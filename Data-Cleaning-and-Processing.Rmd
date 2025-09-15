@@ -15,7 +15,7 @@ library(scales)
 library(forcats)
 library(factoextra)
 library(tibble)
-orig_data = read.csv("listings.csv")
+orig_data = read.csv("datasets/listings.csv")
 ```
 # Clean and Prepare the Data
 ## Removal of Irrelevant Columns

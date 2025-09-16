@@ -1,0 +1,455 @@
+---
+title: "Report_ABC"
+author: "Mia, Junyi"
+date: "2025-09-15"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r library setup, include=FALSE}
+library(dplyr)
+library(knitr)
+library(purrr)
+library(naniar)
+library(ggplot2)
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(caret)
+library(gt)
+library(lubridate)
+library(factoextra)
+library(stringr)
+library(rlang)
+library(scales)
+library(forcats)
+library(tibble)
+```
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+```{r data import, echo=FALSE}
+orig_data = read.csv("datasets/listings.csv")
+dictionary = read.csv("datasets/InsideAirbnbDataDictionarylistings.csvdetailv4.3.csv")
+```
+
+# Define the Problem
+
+**The research question for this project is:** To what extent can Airbnb listing characteristics be used to classify whether a property is operated as a commercial year-round rental or as an occasional host-occupied rental?
+
+**Problem as a Classification Task:** This is a classification problem with two outcomes: commercial year-round rental or occasional host-occupied rental. Predictions rely on listing features such as price, availability, reviews, and minimum nights.
+
+**Relevance to Sydney and Australia:** Airbnb has a notable impact on Sydney’s housing market, where affordability is already a pressing issue. The growth of commercial short-term rentals reduces long-term housing supply and raises pressure on tenants. By classifying listings into commercial and occasional categories, this study highlights the scale of professional operations in Sydney and offers evidence to support housing policy in New South Wales and Australia.
+
+# Describe the Data
+
+**Data Source:** The dataset for comes from Inside Airbnb[🔗](https://insideairbnb.com "Inside Airbnb – Data Source"), an independent project that collects and publishes Airbnb data on housing impacts. The data are obtained through web scraping and are publicly accessible. For this study, we use the detailed listings data for Sydney, New South Wales, dated 10 June 2025.
+
+**Data Description:** The Sydney Airbnb dataset contains 18,187 observations and 79 variables, making it a tall dataset with more listings than attributes. Among the variables, 42 are numeric (27 integer and 15 double), 35 are categorical, and 2 are logical. This mix of quantitative and qualitative features provides the basis for classification. A complete listing of variables is provided in Appendix 1.
+
+The categorical variables vary greatly in distinct values. Some are binary, while others are high-cardinality with up to 18,187 unique values (e.g., identifiers such as host_id). None show zero variance, meaning all contribute some differentiation across listings.
+
+**Outcome Variable:** Dependent variable: binary categorical variable indicating rental type. this variable contain two outcome which is commercial where there’s always available, entire unit, multiple listings by host and occasional where there’s limited availability, host-occupied, fewer listings. Yet this metric it not in the raw data, we will construct it using availability_365, minimum_nights, host_total_listings_count and instant_bookable.
+
+**Data Challenges:** Second, the presence of high-cardinality categorical variables (e.g., identifiers and free-text fields) could inflate dimensionality without adding predictive value, making feature selection essential. Finally, the mix of numeric and categorical variables demands preprocessing to ensure compatibility across models. The overall missing rate is moderate (about 4.85%) but unevenly distributed, with some variables showing substantial gaps (see Appendix 2 for details). Several categorical variables are high-cardinality (e.g., listing_url, amenities), which may add complexity without predictive value. The mix of numeric and categorical variables requires preprocessing to ensure model compatibility.
+
+::::: {style="display:flex; gap:20px;"}
+::: {style="transform:scale(0.8); "}
+```{r}
+orig_dim <- dim(orig_data)
+n_rows <- orig_dim[1]; n_cols <- orig_dim[2]
+
+tibble(
+  Instances = n_rows,
+  Attributes = n_cols,
+  `p >> n?` = ifelse(n_cols > n_rows, "YES (wide dataset)", "NO")
+) |>
+  gt() |>
+  tab_header(title = md("Table 1. Dataset Dimensions")) |>
+  fmt_integer(columns = c(Instances, Attributes)) |>
+  cols_align(align = "center")
+```
+:::
+
+::: {style="transform:scale(0.8);"}
+```{r}
+type_counts <- tibble(
+  Numeric   = sum(map_lgl(orig_data, is.numeric)),
+  Integer   = sum(map_lgl(orig_data, is.integer)),
+  Double    = sum(map_lgl(orig_data, is.double)),
+  Factor    = sum(map_lgl(orig_data, is.factor)),
+  Character = sum(map_lgl(orig_data, is.character)),
+  Logical   = sum(map_lgl(orig_data, is.logical))
+) |>
+  pivot_longer(everything(), names_to = "Type", values_to = "Count")
+
+type_counts |>
+  gt() |>
+  tab_header(title = md("Table 2. Variable Type Counts")) |>
+  fmt_integer(columns = Count) |>
+  cols_align(align = "center")
+```
+:::
+:::::
+::::: {style="display:flex; gap:20px;"}
+::: {style="transform:scale(0.6); "}
+```{r}
+cat_vars <- names(orig_data)[map_lgl(orig_data, ~is.factor(.x) || is.character(.x))]
+
+cat_card <- map_dfr(cat_vars, \(v) {
+  vals <- orig_data[[v]]
+  tibble(
+    variable = v,
+    n_unique = n_distinct(vals, na.rm = TRUE),
+    zero_variance = n_distinct(vals, na.rm = TRUE) <= 1
+  )
+}) |>
+  arrange(desc(n_unique))
+
+cat_summary <- cat_card |>
+  summarise(
+    `# Categorical Variables` = n(),
+    `Min Categories` = min(n_unique, na.rm = TRUE),
+    `Max Categories` = max(n_unique, na.rm = TRUE),
+    `# Zero-variance` = sum(zero_variance)
+  )
+
+cat_summary |>
+  gt() |>
+  tab_header(title = md("Table 3. Summary of Categorical Variables")) |>
+  fmt_integer(columns = everything()) |>
+  cols_align(align = "center")
+```
+:::
+
+::: {style="transform:scale(0.6);"}
+```{r}
+high_card_threshold <- 100
+cat_card |>
+  filter(n_unique > high_card_threshold) |>
+  arrange(desc(n_unique)) |>
+  head(20) |>
+  gt() |>
+  tab_header(
+    title = md(paste0("Table 4. High-cardinality Categorical Variables (>", high_card_threshold, " levels) – Top 20"))
+  ) |>
+  fmt_integer(columns = n_unique) |>
+  cols_label(variable = "Variable", n_unique = "Unique Levels", zero_variance = "Zero Var?") |>
+  cols_align(align = "center")
+```
+:::
+
+:::::
+# Data Cleaning and Processing
+## Initial Cleaning and Basic Feature Construction
+Identifiers (id), URLs, descriptive text (name, description), undocumented variables, and empty columns were excluded. For duplicated fields (e.g., property_type vs. room_type), only one was retained. Key features were engineered, including standardized bathrooms and temporal measures (host_tenure, listing_age).
+```{r}
+filter_vars <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review")
+
+
+cleaned_data <- orig_data %>%
+  #remove unused column
+  select(-any_of(filter_vars)) %>%
+  #feature engineering
+  mutate(
+    bathrooms = coalesce(
+      bathrooms,
+      case_when(
+        str_detect(bathrooms_text, regex("half", ignore_case = TRUE)) ~ 0.5,
+        TRUE ~ as.numeric(str_extract(bathrooms_text, "\\d+(?:\\.\\d+)?")))),
+    host_since = ymd(host_since),
+    first_review = ymd(first_review),
+    last_scraped = ymd(last_scraped),
+    host_tenure = as.numeric(last_scraped - host_since, units = "days"),
+    listing_age = as.numeric(last_scraped - first_review, units = "days")) 
+```
+
+## Data Filtering and Structural Overview
+Listings were restricted to Australia, with valid license, price, and availability information. Unrealistic values (minimum_nights > 365) were removed. Intermediate columns were dropped, and has_availability was excluded since only “t” values remained, followed by a descriptive table of variable types and unique counts.
+
+```{r}
+cleaned_data <- cleaned_data %>%
+# remove invalid data
+  filter(str_detect(host_location, "Australia"),
+         license != "",
+         price != "",
+         has_availability != "",
+         minimum_nights <= 365) %>%
+  # drop usefulness columns
+  select(-c("bathrooms_text", "host_location","host_since", "first_review", "last_scraped","license","has_availability"))
+```
+
+```{r}
+dim(cleaned_data)
+
+description_table_clean <- tibble(Variable = names(cleaned_data)) %>%
+  mutate(Type = sapply(cleaned_data, class),
+         Unique_Values = sapply(cleaned_data, function(x) n_distinct(x, na.rm = TRUE))) %>%
+  select(Variable, Type, Unique_Values)
+
+description_table_clean
+```
+
+## Standardization, Consistency Checks, and Interim Data Summary
+Categorical features were profiled using bar plots, offering an overview of distributions. Neighbourhoods were clustered with k-means, and results validated by Elbow and Silhouette methods were mapped geographically.
+```{r}
+cleaned_data <- cleaned_data %>%
+  mutate(
+    neighborhood_overview = ifelse(!is.na(neighborhood_overview) & neighborhood_overview != "", 1, 0),
+    host_acceptance_rate = as.numeric(str_remove(host_acceptance_rate, "%")),
+    price = as.numeric(str_remove(price, "[$]")),
+    instant_bookable = as.integer(instant_bookable == "t")) %>%
+  filter(across(
+    .cols = where(is.numeric) & !any_of(c("longitude", "latitude")),
+    .fns  = ~ is.na(.x) | .x >= 0),
+    price > 0,
+    host_tenure >= listing_age)
+
+description_table_clean <- tibble(Variable = names(cleaned_data)) %>%
+  mutate(Type = sapply(cleaned_data, class),
+         Unique_Values = sapply(cleaned_data, function(x) n_distinct(x, na.rm = TRUE))) %>%
+  select(Variable, Type, Unique_Values) %>%
+  distinct()
+
+description_table_clean
+```
+
+```{r}
+dims <- cleaned_data %>%
+  distinct() %>%
+  dim()
+
+n_numeric <- sum(sapply(cleaned_data, is.numeric))
+
+n_categorical <- sum(sapply(cleaned_data, function(x) is.character(x) | is.factor(x)))
+
+summary_table <- tibble(
+  Dimension = c("Rows", "Columns", "Numeric Variables", "Categorical Variables"),
+  Count     = c(dims, n_numeric, n_categorical)
+)
+
+summary_table %>%
+  gt() %>%
+  tab_header(title = "Dimensions of Unique Tibble") %>%
+  tab_caption(md("Dimensions of Unique Data Table"))
+```
+
+## Exploration and Visualization
+Categorical distributions were explored using proportional bar plots, providing an overview of feature composition. Neighbourhood coordinates were aggregated and clustered via k-means, with the Elbow and Silhouette methods guiding the choice of cluster numbers. Results were visualized geographically to capture spatial structure.
+```{r}
+plot_categorical_distribution <- function(data) {
+  categorical_vars <- data %>%
+    select(where(is.factor) | where(is.character))
+  figure_counter <- 1
+  for (var in names(categorical_vars)) {
+    non_na_data <- data %>%
+      filter(!is.na(.data[[var]]))
+    if (nrow(non_na_data) == 0) next
+    
+    figure_title <- paste("Proportion of Categories in ", var, sep = "")
+    
+    p <- ggplot(non_na_data, aes(x = .data[[var]])) +       
+      geom_bar(aes(y = (..count..) / sum(..count..), fill = .data[[var]]), color = "black") +       
+      labs(title = figure_title, x = "Category", y = "Proportion") +       
+      theme_minimal() +       
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    print(p)
+    figure_counter <- figure_counter + 1
+    }
+  }
+```
+
+```{r, fig.width= 15}
+plot_categorical_distribution(cleaned_data)
+```
+
+```{r}
+neigh_coords <- cleaned_data %>%
+  filter(!is.na(longitude), !is.na(latitude), !is.na(neighbourhood_cleansed)) %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(
+    avg_lon = mean(longitude, na.rm = TRUE),
+    avg_lat = mean(latitude, na.rm = TRUE),
+    .groups = "drop")
+
+set.seed(5003)
+km <- kmeans(scale(neigh_coords[, c("avg_lon", "avg_lat")]), centers = 3, nstart = 25)
+neigh_coords$cluster <- factor(km$cluster)
+
+coords <- neigh_coords[, c("avg_lon", "avg_lat")]
+
+# Elbow method
+fviz_nbclust(scale(coords), kmeans, method = "wss") + 
+  labs(title = "Elbow Method for Optimal k")
+
+# Silhouette method
+fviz_nbclust(scale(coords), kmeans, method = "silhouette") + 
+  labs(title = "Silhouette Method for Optimal k")
+
+ggplot(neigh_coords, aes(x = avg_lon, y = avg_lat, color = cluster)) +
+  geom_point() +
+  labs(title = "Geographical Distribution of Clusters") +
+  theme_minimal()
+```
+
+## Derived Variables and Data Enrichment
+Room types were simplified, neighbourhood clusters added, and a composite commercial_score created to define a binary rental_type. Distributions were reassessed, and missingness indicators were engineered and visualized.
+```{r}
+cleaned_data <- cleaned_data %>%
+  mutate(
+    room_type = case_when(
+      room_type == "Entire home/apt" ~ "Entire home/apt",
+      room_type %in% c("Hotel room", "Private room", "Shared room") ~ "Non-entire place",TRUE ~ room_type)) %>%
+  left_join(neigh_coords %>% select(neighbourhood_cleansed, cluster), 
+            by = "neighbourhood_cleansed") %>%
+  select(-c("neighbourhood_cleansed","latitude", "longitude"))
+```
+
+```{r}
+cleaned_data <- cleaned_data %>%
+  mutate(
+    commercial_score =
+      (availability_365 >= 300) +
+      (minimum_nights <= 10) +
+      (host_total_listings_count >= 5) +
+      (instant_bookable == "t") +
+      (room_type == "Entire home/apt"),
+    rental_type = ifelse(commercial_score >= 3, "commercial", "occasional"))
+```
+
+```{r, fig.width= 15}
+plot_categorical_distribution(cleaned_data)
+```
+
+```{r}
+cleaned_data <- cleaned_data %>%
+  mutate(
+    # host_acceptance_rate
+    host_acceptance_rate_missing = ifelse(is.na(host_acceptance_rate), 1, 0),
+    host_acceptance_rate = ifelse(is.na(host_acceptance_rate), -1, host_acceptance_rate),
+    
+    # beds/bedrooms/bathrooms
+    beds_missing = ifelse(is.na(beds), 1, 0),
+    bedrooms_missing = ifelse(is.na(bedrooms), 1, 0),
+    bathrooms_missing = ifelse(is.na(bathrooms), 1, 0)
+  )
+
+
+gg_miss_var(cleaned_data%>%select(-c("beds","bedrooms","bathrooms")))
+```
+
+## Documentation and Export
+A structured data dictionary combining manual notes and automated profiling was produced. Both the dictionary and cleaned dataset were exported for further analysis.
+```{r}
+data_dictionary <- tribble(
+  ~variable,                         ~description,                                                                   ~type,                      ~notes,
+  "neighborhood_overview",           "Free-text description of the neighbourhood",                                   "character",               "Kept for reference; not used directly in modeling unless vectorized",
+  "host_id",                         "Unique identifier of the host",                                                "integer / character",     "Identifier; do not use as feature directly",
+  "host_acceptance_rate",            "Percent of booking requests accepted (0–100; -1 if originally missing)",       "numeric (int)",           "Filled -1 for NA; paired with missing flag",
+  "host_total_listings_count",       "Total number of listings managed by the host",                                 "integer",                 ">= 0",
+  "room_type",                       "Room type (Entire home/apt vs Non-entire place)",                              "factor (2 levels)",       "Re-coded to two groups",
+  "accommodates",                    "Maximum number of guests accommodated",                                         "integer",                 ">= 0",
+  "bathrooms",                       "Number of bathrooms",                                                           "numeric",                 "0 valid (shared/none); NA imputed and flagged",
+  "bedrooms",                        "Number of bedrooms",                                                            "integer",                 "0 valid (studio); NA imputed and flagged",
+  "beds",                            "Number of beds",                                                                "integer",                 "0 valid; NA imputed and flagged",
+  "price",                           "Nightly price",                                                                 "numeric",                 "Non-negative; currency in listing locale",
+  "minimum_nights",                  "Minimum nights per stay",                                                       "integer",                 ">= 0; outliers handled",
+  "maximum_nights",                  "Maximum nights per stay",                                                       "integer",                 ">= 0",
+  "availability_30",                 "Available days in next 30 days",                                                "integer",                 "0–30",
+  "availability_60",                 "Available days in next 60 days",                                                "integer",                 "0–60",
+  "availability_90",                 "Available days in next 90 days",                                                "integer",                 "0–90",
+  "availability_365",                "Available days in next 365 days",                                               "integer",                 "0–365",
+  "number_of_reviews",               "Total number of reviews",                                                       "integer",                 ">= 0",
+  "number_of_reviews_ltm",           "Reviews in last 12 months",                                                     "integer",                 ">= 0",
+  "number_of_reviews_l30d",          "Reviews in last 30 days",                                                       "integer",                 ">= 0",
+  "instant_bookable",                "Instant booking enabled (1=yes, 0=no)",                                         "binary (0/1)",            "Converted from 't'/'f'",
+  "calculated_host_listings_count",  "Derived host listing count by platform",                                        "integer",                 "Platform-derived; cross-check with host_total_listings_count",
+  "reviews_per_month",               "Average reviews per month",                                                     "numeric",                 ">= 0; may be NA for new listings",
+  "host_tenure",                     "Host account age",                                                              "integer",                 "Unit per your calc (days/months); should be ≥ listing_age",
+  "listing_age",                     "Listing age since creation",                                                    "integer",                 "Unit per your calc (days/months)",
+  "cluster",                         "Neighbourhood cluster label",                                                   "integer (categorical)",   "From clustering of neighbourhood coordinates",
+  "commercial_score",                "Composite score indicating commercial tendency",                                "integer (0–5)",           "Sum of boolean conditions (e.g., availability, min nights, multi-listings, entire home, instant book)",
+  "rental_type",                     "Dependent variable: 1=Commercial, 0=Occasional",                                "binary (0/1)",            "Constructed from multiple proxies incl. commercial_score",
+  "host_acceptance_rate_missing",    "Was host_acceptance_rate originally missing? 1=yes, 0=no",                      "binary (0/1)",            "Missingness indicator",
+  "beds_missing",                    "Was beds originally missing? 1=yes, 0=no",                                      "binary (0/1)",            "Missingness indicator",
+  "bedrooms_missing",                "Was bedrooms originally missing? 1=yes, 0=no",                                  "binary (0/1)",            "Missingness indicator",
+  "bathrooms_missing",               "Was bathrooms originally missing? 1=yes, 0=no",                                 "binary (0/1)",            "Missingness indicator"
+)
+auto_dict <- tibble(
+  variable  = names(cleaned_data),
+  r_class   = map_chr(cleaned_data, ~ paste(class(.x), collapse = "/")),
+  n_missing = map_int(cleaned_data, ~ sum(is.na(.x))),)
+
+final_dict <- auto_dict %>%
+  left_join(data_dictionary, by = "variable") %>%
+  relocate(variable, description, type, r_class, n_missing, notes)
+```
+
+```{r}
+write.csv(final_dict, "cleaned_data_dictionary.csv", row.names = FALSE)
+```
+
+```{r}
+write.csv(cleaned_data, "cleaned_data.csv", row.names = FALSE)
+```
+
+
+
+
+
+
+
+
+
+# Appendix
+
+Appendix 1: Variable Description
+
+```{r, echo=TRUE, results='markup', code_folding="show"}
+orig_dim = dim(orig_data)
+
+dictionary_clean <- dictionary %>%
+  select(Variable = 1, Description = 4)
+
+description_table <- tibble(Variable = names(orig_data)) %>%
+  mutate(Type = ifelse(sapply(orig_data, is.numeric), "Numeric", "Categorical"),
+         Unique_Values = sapply(orig_data, function(x) n_distinct(x, na.rm = TRUE))) %>%
+  left_join(dictionary_clean, by = "Variable") %>%
+  select(Variable, Description, Type, Unique_Values)
+```
+
+```{r, echo=FALSE, results='asis'}
+description_table %>%
+  gt() %>%
+  text_transform(
+    locations = cells_body(columns = vars(Description)),
+    fn = function(x) str_trunc(x, width = 60)  
+  ) %>%
+  tab_options(
+    table.font.size = px(12),
+    data_row.padding = px(3)
+  ) %>%
+  opt_table_font(
+    font = list(
+      google_font("Roboto"),
+      default_fonts()
+    )
+  ) %>%
+  # CSS
+  tab_style(
+    style = list(
+      cell_text(whitespace = "nowrap")  
+    ),
+    locations = cells_body(columns = vars(Description))
+  )
+```
+
+Appendix 2: Missing Value
+
+```{r figure x, fig.height= 12, echo=FALSE, results='asis'}
+gg_miss_var(orig_data) +
+  labs(title = "Appendix 2: Missing Values per Variable")
+```

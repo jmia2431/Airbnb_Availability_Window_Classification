@@ -253,35 +253,3 @@ write.csv(final_dict, "cleaned_data_dictionary.csv", row.names = FALSE)
 ```{r}
 write.csv(cleaned_data, "cleaned_data.csv", row.names = FALSE)
 ```
-
-## Formatting and Type Conversion
-- Ensure column names are consistent
-- Convert variables to appropriate data types  
-
-## Handling Duplicates
-- Remove exact duplicates.  
-- Flag potential duplicates
-
-## Detecting and Handling Outliers
-- Invalid entries
-- Extreme values
-
-## Distribution of Categorical Variables
-- Merge if proportion is small
-
-## Missing Values
-- Calculate proportion of missing values per column.  
-- Decide handling strategy:  
-  - Remove columns with excessive missingness (>70%).  
-  - Impute with median/mean/mode where reasonable.  
-  - Create missingness indicators  
-
-## Feature Engineering
-- Create new variables to support analysis if needed  
-- Collapse high-cardinality categorical variables if needed.  
-- Encode categorical variables appropriately for modeling
-
-## Final Dataset Preparation
-- Re-check structure and summary after cleaning.  
-- Save the cleaned dataset.  
-- Ensure data is ready for EDA and modeling.  

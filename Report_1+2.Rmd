@@ -1,0 +1,142 @@
+---
+title: "Report_Stage1"
+author: "Mia, Junyi"
+date: "2025-09-15"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r library setup, include=FALSE}
+library(dplyr)
+library(knitr)
+library(purrr)
+library(naniar)
+library(ggplot2)
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(caret)
+library(gt)
+library(lubridate)
+library(factoextra)
+library(stringr)
+```
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+```{r data import, echo=FALSE}
+orig_data = read.csv("datasets/listings.csv")
+dictionary = read.csv("datasets/InsideAirbnbDataDictionarylistings.csvdetailv4.3.csv")
+```
+
+# Define the Problem
+
+**The research question for this project is:** To what extent can Airbnb listing characteristics be used to classify whether a property is operated as a commercial year-round rental or as an occasional host-occupied rental?
+
+**Problem as a Classification Task:** This is a classification problem with two outcomes: commercial year-round rental or occasional host-occupied rental. Predictions rely on listing features such as price, availability, reviews, and minimum nights.
+
+**Relevance to Sydney and Australia:** Airbnb has a notable impact on Sydney’s housing market, where affordability is already a pressing issue. The growth of commercial short-term rentals reduces long-term housing supply and raises pressure on tenants. By classifying listings into commercial and occasional categories, this study highlights the scale of professional operations in Sydney and offers evidence to support housing policy in New South Wales and Australia.
+
+# Describe the Data
+
+**Data Source:** The dataset for comes from Inside Airbnb[🔗](https://insideairbnb.com "Inside Airbnb – Data Source"), an independent project that collects and publishes Airbnb data on housing impacts. The data are obtained through web scraping and are publicly accessible. For this study, we use the detailed listings data for Sydney, New South Wales, dated 10 June 2025.
+
+**Data Description:** The Sydney Airbnb dataset contains 18,187 observations and 79 variables, making it a tall dataset with more listings than attributes. Among the variables, 42 are numeric (27 integer and 15 double), 35 are categorical, and 2 are logical. This mix of quantitative and qualitative features provides the basis for classification. A complete listing of variables is provided in Appendix 1.
+
+The categorical variables vary greatly in distinct values. Some are binary, while others are high-cardinality with up to 18,187 unique values (e.g., identifiers such as host_id). None show zero variance, meaning all contribute some differentiation across listings.
+
+**Outcome Variable:** Dependent variable: binary categorical variable indicating rental type. this variable contain two outcome which is commercial where there’s always available, entire unit, multiple listings by host and occasional where there’s limited availability, host-occupied, fewer listings. Yet this metric it not in the raw data, we will construct it using availability_365, minimum_nights, host_total_listings_count and instant_bookable.
+
+**Data Challenges:** Second, the presence of high-cardinality categorical variables (e.g., identifiers and free-text fields) could inflate dimensionality without adding predictive value, making feature selection essential. Finally, the mix of numeric and categorical variables demands preprocessing to ensure compatibility across models. The overall missing rate is moderate (about 4.85%) but unevenly distributed, with some variables showing substantial gaps (see Appendix 2 for details). Several categorical variables are high-cardinality (e.g., listing_url, amenities), which may add complexity without predictive value. The mix of numeric and categorical variables requires preprocessing to ensure model compatibility.
+
+
+<div style="display:flex; gap:20px;">
+  <div style="transform:scale(0.8); ">
+```{r}
+orig_dim <- dim(orig_data)
+n_rows <- orig_dim[1]; n_cols <- orig_dim[2]
+
+tibble(
+  Instances = n_rows,
+  Attributes = n_cols,
+  `p >> n?` = ifelse(n_cols > n_rows, "YES (wide dataset)", "NO")
+) |>
+  gt() |>
+  tab_header(title = md("Table 1. Dataset Dimensions")) |>
+  fmt_integer(columns = c(Instances, Attributes)) |>
+  cols_align(align = "center")
+```
+  </div> 
+  <div style="transform:scale(0.8);">
+```{r}
+type_counts <- tibble(
+  Numeric   = sum(map_lgl(orig_data, is.numeric)),
+  Integer   = sum(map_lgl(orig_data, is.integer)),
+  Double    = sum(map_lgl(orig_data, is.double)),
+  Factor    = sum(map_lgl(orig_data, is.factor)),
+  Character = sum(map_lgl(orig_data, is.character)),
+  Logical   = sum(map_lgl(orig_data, is.logical))
+) |>
+  pivot_longer(everything(), names_to = "Type", values_to = "Count")
+
+type_counts |>
+  gt() |>
+  tab_header(title = md("Table 2. Variable Type Counts")) |>
+  fmt_integer(columns = Count) |>
+  cols_align(align = "center")
+```
+  </div>
+</div>
+
+# Appendix
+
+Appendix 1: Variable Description
+```{r, echo=TRUE, results='markup', code_folding="show"}
+orig_dim = dim(orig_data)
+
+dictionary_clean <- dictionary %>%
+  select(Variable = 1, Description = 4)
+
+description_table <- tibble(Variable = names(orig_data)) %>%
+  mutate(Type = ifelse(sapply(orig_data, is.numeric), "Numeric", "Categorical"),
+         Unique_Values = sapply(orig_data, function(x) n_distinct(x, na.rm = TRUE))) %>%
+  left_join(dictionary_clean, by = "Variable") %>%
+  select(Variable, Description, Type, Unique_Values)
+```
+
+```{r, echo=FALSE, results='asis'}
+description_table %>%
+  gt() %>%
+  text_transform(
+    locations = cells_body(columns = vars(Description)),
+    fn = function(x) str_trunc(x, width = 60)  
+  ) %>%
+  tab_options(
+    table.font.size = px(12),
+    data_row.padding = px(3)
+  ) %>%
+  opt_table_font(
+    font = list(
+      google_font("Roboto"),
+      default_fonts()
+    )
+  ) %>%
+  # CSS
+  tab_style(
+    style = list(
+      cell_text(whitespace = "nowrap")  
+    ),
+    locations = cells_body(columns = vars(Description))
+  )
+```
+
+Appendix 2: Missing Value
+
+```{r figure x, fig.height= 12, echo=FALSE, results='asis'}
+gg_miss_var(orig_data) +
+  labs(title = "Appendix 2: Missing Values per Variable")
+```
+

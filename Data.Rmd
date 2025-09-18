@@ -1,0 +1,10 @@
+---
+title: "Data"
+author: "mia"
+date: "2025-09-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+```

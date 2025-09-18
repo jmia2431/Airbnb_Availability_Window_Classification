@@ -1,0 +1,192 @@
+---
+title: "Report1-3"
+author: "Mia, Junyi"
+date: "2025-09-15"
+output:
+  html_document:
+---
+
+```{r library setup}
+library(dplyr)
+library(knitr)
+library(purrr)
+library(naniar)
+library(ggplot2)
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(caret)
+library(gt)
+library(lubridate)
+library(factoextra)
+library(stringr)
+warning(FALSE)
+```
+
+```{r data import}
+orig_data = read.csv("datasets/listings.csv")
+dictionary = read.csv("datasets/InsideAirbnbDataDictionarylistings.csvdetailv4.3.csv")
+```
+
+# Define the Problem
+
+**The research question for this project is:** To what extent can Airbnb listing characteristics be used to classify whether a property is operated as a commercial year-round rental or as an occasional host-occupied rental?
+
+**Problem as a Classification Task:** This is a classification problem with two outcomes: commercial year-round rental or occasional host-occupied rental. Predictions rely on listing features such as price, availability, reviews, and minimum nights.
+
+**Relevance to Sydney and Australia:** Airbnb has a notable impact on Sydney’s housing market, where affordability is already a pressing issue. The growth of commercial short-term rentals reduces long-term housing supply and raises pressure on tenants. By classifying listings into commercial and occasional categories, this study highlights the scale of professional operations in Sydney and offers evidence to support housing policy in New South Wales and Australia.
+
+# Describe the Data
+```{r Describe the Data}
+observations = dim(orig_data)[1]
+variables = dim(orig_data)[2]
+numeric = sum(sapply(orig_data, is.numeric)) 
+integer = sum(sapply(orig_data, is.integer)) 
+double = sum(sapply(orig_data, is.double)) 
+categorical = sum(sapply(orig_data, is.character)) 
+logical = sum(sapply(orig_data, is.logical))
+uniques <- sapply(orig_data, function(x) n_distinct(x, na.rm = TRUE))
+maxunique     <- max(uniques)
+maxuniquename <- names(uniques)[which.max(uniques)]
+overall_missing_pct <- round((sum(is.na(orig_data))/(nrow(orig_data)*ncol(orig_data)))*100,2)
+```
+
+## Data Source
+The dataset for comes from Inside Airbnb(reference 1), an independent project that collects and publishes Airbnb data on housing impacts. The data are obtained through web scraping and are publicly accessible. For this study, we use the detailed listings data for Sydney, New South Wales, dated 10 June 2025.
+
+## Data Description
+The Sydney Airbnb dataset contains `r observations` observations and `r variables `variables, making it a tall dataset with more listings than attributes. Among the variables, `r numeric` are numeric (`r integer`) integer and `r double` double), `r categorical` are categorical, and `r logical` are logical. This mix of quantitative and qualitative features provides the basis for classification. **A complete listing of variables is provided in Appendix 1?.**
+
+The categorical variables vary greatly in distinct values. Some are binary, while others are high-cardinality with up to `r maxunique` unique values (e.g., identifiers such as `r maxuniquename`). None show zero variance, meaning all contribute some differentiation across listings.
+
+## Outcome Variable
+Dependent variable: binary categorical variable indicating rental type. This variable contain two outcome which is commercial where there’s always available, entire unit, multiple listings by host and occasional where there’s limited availability, host-occupied, fewer listings. Yet this metric it not in the raw data, we will construct it using `availability_365`, `minimum_nights`, `host_total_listings_count` and `instant_bookable`.
+
+## Data Challenges
+Large number of variables results in high dimensionality, complicate both exploration and modelling. In particular, the presence of high-cardinality categorical variable(e.g., `listing_url`and`amenities`) risked inflating dimensionality without contributing meaningful predictive values. The coexistence of heterogeneous data types necessitates careful preprocessing to ensure model compatibility and reliable downstream analysis. The dataset shows a moderate overall missing rate of `r overall_missing_pct`, but this is unevenly distributed across features. A small subset of variables accounts for the majority of gaps, with some exhibiting substantial missingness(Appendix 2).
+# Clean and Prepare the Data
+```{r cleaning and prepare the data}
+set.seed(5003)
+cleaned_data <- orig_data %>%
+  # (1) drop clearly irrelevant, high-cardinality ,empty and PII columns to reduce noise and width.
+  select(-any_of(c(
+    "scrape_id","host_name","host_about","host_thumbnail_url","host_picture_url","id",
+    "listing_url","name","description","picture_url","host_url","host_neighbourhood",
+    "availability_eoy","number_of_reviews_ly","estimated_occupancy_l365d",
+    "estimated_revenue_l365d","source","host_response_time","host_response_rate",
+    "host_is_superhost","host_verifications","host_has_profile_pic",
+    "host_identity_verified","neighbourhood","amenities","calendar_updated",
+    "calendar_last_scraped","review_scores_rating","review_scores_accuracy",
+    "review_scores_cleanliness","review_scores_checkin","review_scores_communication",
+    "review_scores_location","review_scores_value","property_type","minimum_minimum_nights",
+    "maximum_minimum_nights","minimum_maximum_nights","maximum_maximum_nights",
+    "minimum_nights_avg_ntm","maximum_nights_avg_ntm","neighbourhood_group_cleansed",
+    "host_listings_count","calculated_host_listings_count_entire_homes",
+    "calculated_host_listings_count_private_rooms",
+    "calculated_host_listings_count_shared_rooms","last_review"
+  ))) %>%
+  # (2) feature engineering and type fixed
+  # bathrooms: prefer numeric; fallback to parse from text and handle "half".
+  # parse dates; compute tenures as day counts for modelling.
+  mutate(
+    bathrooms = coalesce(bathrooms,case_when(str_detect(coalesce(bathrooms_text, ""), regex("half", ignore_case = TRUE)) ~ 0.5, TRUE ~ as.numeric(str_extract(coalesce(bathrooms_text, ""), "\\d+(?:\\.\\d+)?")))),
+    host_since   = ymd(host_since),
+    first_review = ymd(first_review),
+    last_scraped = ymd(last_scraped),
+    host_tenure  = as.numeric(last_scraped - host_since, units = "days"),
+    listing_age  = as.numeric(last_scraped - first_review, units = "days")
+  ) %>%
+  # (3) 
+  filter(
+    str_detect(coalesce(host_location, ""), "Australia"),
+    license != "",
+    price   != "",
+    has_availability != "",
+    minimum_nights <= 365
+  ) %>%
+
+  # 4) 丢弃已无用的中间列
+  select(-any_of(c(
+    "bathrooms_text","host_location","host_since","first_review","last_scraped",
+    "license","has_availability"
+  ))) %>%
+
+  # 5) 进一步清洗与规范化
+  mutate(
+    neighborhood_overview = if_else(!is.na(neighborhood_overview) & neighborhood_overview != "", 1L, 0L),
+    host_acceptance_rate  = as.numeric(str_remove(host_acceptance_rate, "%")),
+    price                 = as.numeric(str_remove(str_remove(price, "[$]"), ",")),
+    instant_bookable      = as.integer(instant_bookable == "t"),
+    room_type = case_when(
+      room_type == "Entire home/apt" ~ "Entire home/apt",
+      room_type %in% c("Hotel room","Private room","Shared room") ~ "Non-entire place",
+      TRUE ~ room_type
+    )
+  ) %>%
+
+  # 6) 数值列约束（排除经纬度）；以及逻辑过滤
+  filter(
+    if_all(c(where(is.numeric), -all_of(c("longitude","latitude"))),
+           ~ is.na(.x) | .x >= 0),
+    price > 0,
+    host_tenure >= listing_age
+  ) %>%
+
+  # 7) 内联计算邻里聚类表，并回填 cluster
+  left_join(
+    {
+      tmp <- . %>%
+        filter(!is.na(longitude), !is.na(latitude), !is.na(neighbourhood_cleansed)) %>%
+        group_by(neighbourhood_cleansed) %>%
+        summarise(
+          avg_lon = mean(longitude, na.rm = TRUE),
+          avg_lat = mean(latitude, na.rm = TRUE),
+          .groups = "drop"
+        )
+      km <- kmeans(scale(dplyr::select(tmp, avg_lon, avg_lat)),
+                   centers = 3, nstart = 25)
+      tmp %>%
+        mutate(cluster = factor(km$cluster)) %>%
+        select(neighbourhood_cleansed, cluster)
+    },
+    by = "neighbourhood_cleansed"
+  ) %>%
+
+  # 8) 打商业化得分与标签（按行求和更稳，自动跳过 NA）
+  mutate(
+    commercial_score = rowSums(cbind(
+      availability_365 >= 300,
+      minimum_nights <= 10,
+      host_total_listings_count >= 5,
+      instant_bookable == 1,
+      room_type == "Entire home/apt"
+    ), na.rm = TRUE),
+    rental_type = if_else(commercial_score >= 3, "commercial", "occasional")
+  ) %>%
+
+  # 9) 最后再丢坐标与 join 键
+  select(-any_of(c("neighbourhood_cleansed","latitude","longitude")))
+
+```
+
+
+# Appendix
+Appendix 1: Variable Description
+```{r Appendix 1}
+
+```
+
+Appendix 2: Missing Value
+```{r Appendix 2}
+miss_by_var <- tibble(
+  Variable            = names(orig_data),
+  `Number of Missing` = sapply(orig_data, function(x) sum(is.na(x)))) %>%
+  mutate(`Percentage of Missing` = 100 * `Number of Missing` / nrow(orig_data))
+top15_vars <- miss_by_var %>%
+  arrange(desc(`Percentage of Missing`), desc(`Number of Missing`)) %>%
+  slice_head(n = 15)
+gt(top15_vars) %>%
+  tab_header(title = "Top 15 Variables by Missingness") %>%
+  fmt_number(columns = `Percentage of Missing`, decimals = 2)
+```
+

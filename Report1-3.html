@@ -209,6 +209,83 @@ window.buildTabsets = function(tocID) {
 };
 
 </script>
+<script>
+window.initializeCodeFolding = function(show) {
+
+  // handlers for show-all and hide all
+  $("#rmd-show-all-code").click(function() {
+    $('div.r-code-collapse').each(function() {
+      $(this).collapse('show');
+    });
+  });
+  $("#rmd-hide-all-code").click(function() {
+    $('div.r-code-collapse').each(function() {
+      $(this).collapse('hide');
+    });
+  });
+
+  // index for unique code element ids
+  var currentIndex = 1;
+
+  // select all R code blocks
+  var rCodeBlocks = $('pre.r, pre.python, pre.bash, pre.sql, pre.cpp, pre.stan, pre.julia, pre.foldable');
+  rCodeBlocks.each(function() {
+    // skip if the block has fold-none class
+    if ($(this).hasClass('fold-none')) return;
+
+    // create a collapsable div to wrap the code in
+    var div = $('<div class="collapse r-code-collapse"></div>');
+    var showThis = (show || $(this).hasClass('fold-show')) && !$(this).hasClass('fold-hide');
+    var id = 'rcode-643E0F36' + currentIndex++;
+    div.attr('id', id);
+    $(this).before(div);
+    $(this).detach().appendTo(div);
+
+    // add a show code button right above
+    var showCodeText = $('<span>' + (showThis ? 'Hide' : 'Show') + '</span>');
+    var showCodeButton = $('<button type="button" class="btn btn-default btn-xs btn-secondary btn-sm code-folding-btn pull-right float-right"></button>');
+    showCodeButton.append(showCodeText);
+    showCodeButton
+        .attr('data-toggle', 'collapse')
+        .attr('data-bs-toggle', 'collapse') // BS5
+        .attr('data-target', '#' + id)
+        .attr('data-bs-target', '#' + id)   // BS5
+        .attr('aria-expanded', showThis)
+        .attr('aria-controls', id);
+
+    var buttonRow = $('<div class="row"></div>');
+    var buttonCol = $('<div class="col-md-12"></div>');
+
+    buttonCol.append(showCodeButton);
+    buttonRow.append(buttonCol);
+
+    div.before(buttonRow);
+
+    // show the div if necessary
+    if (showThis) div.collapse('show');
+
+    // update state of button on show/hide
+    //   * Change text
+    //   * add a class for intermediate states styling
+    div.on('hide.bs.collapse', function () {
+      showCodeText.text('Show');
+      showCodeButton.addClass('btn-collapsing');
+    });
+    div.on('hidden.bs.collapse', function () {
+      showCodeButton.removeClass('btn-collapsing');
+    });
+    div.on('show.bs.collapse', function () {
+      showCodeText.text('Hide');
+      showCodeButton.addClass('btn-expanding');
+    });
+    div.on('shown.bs.collapse', function () {
+      showCodeButton.removeClass('btn-expanding');
+    });
+
+  });
+
+}
+</script>
 <style type="text/css">.hljs-literal {
 color: #990073;
 }
@@ -332,6 +409,9 @@ display: none;
 </style>
 
 <!-- code folding -->
+<style type="text/css">
+.code-folding-btn { margin-bottom: 4px; }
+</style>
 
 
 
@@ -348,6 +428,14 @@ display: none;
 
 <div id="header">
 
+<div class="btn-group pull-right float-right">
+<button type="button" class="btn btn-default btn-xs btn-secondary btn-sm dropdown-toggle" data-toggle="dropdown" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><span>Code</span> <span class="caret"></span></button>
+<ul class="dropdown-menu dropdown-menu-right" style="min-width: 50px;">
+<li><a id="rmd-show-all-code" href="#">Show All Code</a></li>
+<li><a id="rmd-hide-all-code" href="#">Hide All Code</a></li>
+</ul>
+</div>
+
 
 
 <h1 class="title toc-ignore">Report1-3</h1>
@@ -357,8 +445,20 @@ display: none;
 </div>
 
 
-<pre class="r"><code>orig_data = read.csv(&quot;datasets/listings.csv&quot;)
-dictionary = read.csv(&quot;datasets/InsideAirbnbDataDictionarylistings.csvdetailv4.3.csv&quot;)</code></pre>
+<pre class="r"><code>library(dplyr)
+library(knitr)
+library(purrr)
+library(naniar)
+library(ggplot2)
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(caret)
+library(gt)
+library(lubridate)
+library(factoextra)
+library(stringr)</code></pre>
+<pre class="r"><code>orig_data = read.csv(&quot;datasets/listings.csv&quot;)</code></pre>
 <div id="define-the-problem" class="section level1">
 <h1>Define the Problem</h1>
 <p><strong>The research question for this project is:</strong> To what
@@ -388,37 +488,47 @@ double = sum(sapply(orig_data, is.double))
 categorical = sum(sapply(orig_data, is.character)) 
 logical = sum(sapply(orig_data, is.logical))
 uniques &lt;- sapply(orig_data, function(x) n_distinct(x, na.rm = TRUE))
-maxunique     &lt;- max(uniques)
+maxunique &lt;- max(uniques)
 maxuniquename &lt;- names(uniques)[which.max(uniques)]
 overall_missing_pct &lt;- round((sum(is.na(orig_data))/(nrow(orig_data)*ncol(orig_data)))*100,2)</code></pre>
-<p><strong>Data Source:</strong> The dataset for comes from Inside
-Airbnb(reference 1), an independent project that collects and publishes
-Airbnb data on housing impacts. The data are obtained through web
-scraping and are publicly accessible. For this study, we use the
-detailed listings data for Sydney, New South Wales, dated 10 June
-2025.</p>
-<p><strong>Data Description:</strong> The Sydney Airbnb dataset contains
-18187 observations and 79variables, making it a tall dataset with more
-listings than attributes. Among the variables, 42 are numeric (27)
-integer and 15 double), 35 are categorical, and 2 are logical. This mix
-of quantitative and qualitative features provides the basis for
-classification. <strong>A complete listing of variables is provided in
-Appendix 1?.</strong></p>
+<div id="data-source" class="section level2">
+<h2>Data Source</h2>
+<p>The dataset for comes from Inside Airbnb(reference 1), an independent
+project that collects and publishes Airbnb data on housing impacts. The
+data are obtained through web scraping and are publicly accessible. For
+this study, we use the detailed listings data for Sydney, New South
+Wales, dated 10 June 2025.</p>
+</div>
+<div id="data-description" class="section level2">
+<h2>Data Description</h2>
+<p>The Sydney Airbnb dataset contains 18187 observations and
+79variables, making it a tall dataset with more listings than
+attributes. Among the variables, 42 are numeric (27) integer and 15
+double), 35 are categorical, and 2 are logical. This mix of quantitative
+and qualitative features provides the basis for classification.
+<strong>A complete listing of variables is provided in Appendix
+1?.</strong></p>
 <p>The categorical variables vary greatly in distinct values. Some are
 binary, while others are high-cardinality with up to 18187 unique values
 (e.g., identifiers such as id). None show zero variance, meaning all
 contribute some differentiation across listings.</p>
-<p><strong>Outcome Variable:</strong> Dependent variable: binary
-categorical variable indicating rental type. This variable contain two
-outcome which is commercial where there’s always available, entire unit,
-multiple listings by host and occasional where there’s limited
-availability, host-occupied, fewer listings. Yet this metric it not in
-the raw data, we will construct it using <code>availability_365</code>,
-<code>minimum_nights</code>, <code>host_total_listings_count</code> and
+</div>
+<div id="outcome-variable" class="section level2">
+<h2>Outcome Variable</h2>
+<p>Dependent variable: binary categorical variable indicating rental
+type. This variable contain two outcome which is commercial where
+there’s always available, entire unit, multiple listings by host and
+occasional where there’s limited availability, host-occupied, fewer
+listings. Yet this metric it not in the raw data, we will construct it
+using <code>availability_365</code>, <code>minimum_nights</code>,
+<code>host_total_listings_count</code> and
 <code>instant_bookable</code>.</p>
-<p><strong>Data Challenges:</strong> Large number of variables results
-in high dimensionality, complicate both exploration and modelling. In
-particular, the presence of high-cardinality categorical variable(e.g.,
+</div>
+<div id="data-challenges" class="section level2">
+<h2>Data Challenges</h2>
+<p>Large number of variables results in high dimensionality, complicate
+both exploration and modelling. In particular, the presence of
+high-cardinality categorical variable(e.g.,
 <code>listing_url</code>and<code>amenities</code>) risked inflating
 dimensionality without contributing meaningful predictive values. The
 coexistence of heterogeneous data types necessitates careful
@@ -427,907 +537,96 @@ analysis. The dataset shows a moderate overall missing rate of 4.85, but
 this is unevenly distributed across features. A small subset of
 variables accounts for the majority of gaps, with some exhibiting
 substantial missingness(Appendix 2).</p>
-<div style="display:flex; gap:20px;">
-<div style="transform:scale(0.8); ">
-<pre class="r"><code>orig_dim &lt;- dim(orig_data)
-n_rows &lt;- orig_dim[1]; n_cols &lt;- orig_dim[2]
-
-tibble(
-  Instances = n_rows,
-  Attributes = n_cols,
-  `p &gt;&gt; n?` = ifelse(n_cols &gt; n_rows, &quot;YES (wide dataset)&quot;, &quot;NO&quot;)
-) |&gt;
-  gt() |&gt;
-  tab_header(title = md(&quot;Table 1. Dataset Dimensions&quot;)) |&gt;
-  fmt_integer(columns = c(Instances, Attributes)) |&gt;
-  cols_align(align = &quot;center&quot;)</code></pre>
-<div id="oqeprvftbp" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
-<style>#oqeprvftbp table {
-font-family: system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
--webkit-font-smoothing: antialiased;
--moz-osx-font-smoothing: grayscale;
-}
-#oqeprvftbp thead, #oqeprvftbp tbody, #oqeprvftbp tfoot, #oqeprvftbp tr, #oqeprvftbp td, #oqeprvftbp th {
-border-style: none;
-}
-#oqeprvftbp p {
-margin: 0;
-padding: 0;
-}
-#oqeprvftbp .gt_table {
-display: table;
-border-collapse: collapse;
-line-height: normal;
-margin-left: auto;
-margin-right: auto;
-color: #333333;
-font-size: 16px;
-font-weight: normal;
-font-style: normal;
-background-color: #FFFFFF;
-width: auto;
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #A8A8A8;
-border-right-style: none;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #A8A8A8;
-border-left-style: none;
-border-left-width: 2px;
-border-left-color: #D3D3D3;
-}
-#oqeprvftbp .gt_caption {
-padding-top: 4px;
-padding-bottom: 4px;
-}
-#oqeprvftbp .gt_title {
-color: #333333;
-font-size: 125%;
-font-weight: initial;
-padding-top: 4px;
-padding-bottom: 4px;
-padding-left: 5px;
-padding-right: 5px;
-border-bottom-color: #FFFFFF;
-border-bottom-width: 0;
-}
-#oqeprvftbp .gt_subtitle {
-color: #333333;
-font-size: 85%;
-font-weight: initial;
-padding-top: 3px;
-padding-bottom: 5px;
-padding-left: 5px;
-padding-right: 5px;
-border-top-color: #FFFFFF;
-border-top-width: 0;
-}
-#oqeprvftbp .gt_heading {
-background-color: #FFFFFF;
-text-align: center;
-border-bottom-color: #FFFFFF;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-}
-#oqeprvftbp .gt_bottom_border {
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-}
-#oqeprvftbp .gt_col_headings {
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-}
-#oqeprvftbp .gt_col_heading {
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: normal;
-text-transform: inherit;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-vertical-align: bottom;
-padding-top: 5px;
-padding-bottom: 6px;
-padding-left: 5px;
-padding-right: 5px;
-overflow-x: hidden;
-}
-#oqeprvftbp .gt_column_spanner_outer {
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: normal;
-text-transform: inherit;
-padding-top: 0;
-padding-bottom: 0;
-padding-left: 4px;
-padding-right: 4px;
-}
-#oqeprvftbp .gt_column_spanner_outer:first-child {
-padding-left: 0;
-}
-#oqeprvftbp .gt_column_spanner_outer:last-child {
-padding-right: 0;
-}
-#oqeprvftbp .gt_column_spanner {
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-vertical-align: bottom;
-padding-top: 5px;
-padding-bottom: 5px;
-overflow-x: hidden;
-display: inline-block;
-width: 100%;
-}
-#oqeprvftbp .gt_spanner_row {
-border-bottom-style: hidden;
-}
-#oqeprvftbp .gt_group_heading {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: initial;
-text-transform: inherit;
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-vertical-align: middle;
-text-align: left;
-}
-#oqeprvftbp .gt_empty_group_heading {
-padding: 0.5px;
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: initial;
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-vertical-align: middle;
-}
-#oqeprvftbp .gt_from_md > :first-child {
-margin-top: 0;
-}
-#oqeprvftbp .gt_from_md > :last-child {
-margin-bottom: 0;
-}
-#oqeprvftbp .gt_row {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-margin: 10px;
-border-top-style: solid;
-border-top-width: 1px;
-border-top-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-vertical-align: middle;
-overflow-x: hidden;
-}
-#oqeprvftbp .gt_stub {
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: initial;
-text-transform: inherit;
-border-right-style: solid;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-padding-left: 5px;
-padding-right: 5px;
-}
-#oqeprvftbp .gt_stub_row_group {
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: initial;
-text-transform: inherit;
-border-right-style: solid;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-padding-left: 5px;
-padding-right: 5px;
-vertical-align: top;
-}
-#oqeprvftbp .gt_row_group_first td {
-border-top-width: 2px;
-}
-#oqeprvftbp .gt_row_group_first th {
-border-top-width: 2px;
-}
-#oqeprvftbp .gt_summary_row {
-color: #333333;
-background-color: #FFFFFF;
-text-transform: inherit;
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-}
-#oqeprvftbp .gt_first_summary_row {
-border-top-style: solid;
-border-top-color: #D3D3D3;
-}
-#oqeprvftbp .gt_first_summary_row.thick {
-border-top-width: 2px;
-}
-#oqeprvftbp .gt_last_summary_row {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-}
-#oqeprvftbp .gt_grand_summary_row {
-color: #333333;
-background-color: #FFFFFF;
-text-transform: inherit;
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-}
-#oqeprvftbp .gt_first_grand_summary_row {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-border-top-style: double;
-border-top-width: 6px;
-border-top-color: #D3D3D3;
-}
-#oqeprvftbp .gt_last_grand_summary_row_top {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-border-bottom-style: double;
-border-bottom-width: 6px;
-border-bottom-color: #D3D3D3;
-}
-#oqeprvftbp .gt_striped {
-background-color: rgba(128, 128, 128, 0.05);
-}
-#oqeprvftbp .gt_table_body {
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-}
-#oqeprvftbp .gt_footnotes {
-color: #333333;
-background-color: #FFFFFF;
-border-bottom-style: none;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 2px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-}
-#oqeprvftbp .gt_footnote {
-margin: 0px;
-font-size: 90%;
-padding-top: 4px;
-padding-bottom: 4px;
-padding-left: 5px;
-padding-right: 5px;
-}
-#oqeprvftbp .gt_sourcenotes {
-color: #333333;
-background-color: #FFFFFF;
-border-bottom-style: none;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 2px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-}
-#oqeprvftbp .gt_sourcenote {
-font-size: 90%;
-padding-top: 4px;
-padding-bottom: 4px;
-padding-left: 5px;
-padding-right: 5px;
-}
-#oqeprvftbp .gt_left {
-text-align: left;
-}
-#oqeprvftbp .gt_center {
-text-align: center;
-}
-#oqeprvftbp .gt_right {
-text-align: right;
-font-variant-numeric: tabular-nums;
-}
-#oqeprvftbp .gt_font_normal {
-font-weight: normal;
-}
-#oqeprvftbp .gt_font_bold {
-font-weight: bold;
-}
-#oqeprvftbp .gt_font_italic {
-font-style: italic;
-}
-#oqeprvftbp .gt_super {
-font-size: 65%;
-}
-#oqeprvftbp .gt_footnote_marks {
-font-size: 75%;
-vertical-align: 0.4em;
-position: initial;
-}
-#oqeprvftbp .gt_asterisk {
-font-size: 100%;
-vertical-align: 0;
-}
-#oqeprvftbp .gt_indent_1 {
-text-indent: 5px;
-}
-#oqeprvftbp .gt_indent_2 {
-text-indent: 10px;
-}
-#oqeprvftbp .gt_indent_3 {
-text-indent: 15px;
-}
-#oqeprvftbp .gt_indent_4 {
-text-indent: 20px;
-}
-#oqeprvftbp .gt_indent_5 {
-text-indent: 25px;
-}
-#oqeprvftbp .katex-display {
-display: inline-flex !important;
-margin-bottom: 0.75em !important;
-}
-#oqeprvftbp div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
-height: 0px !important;
-}
-</style>
-<table class="gt_table" data-quarto-disable-processing="false" data-quarto-bootstrap="false">
-  <thead>
-    <tr class="gt_heading">
-      <td colspan="3" class="gt_heading gt_title gt_font_normal gt_bottom_border" style><span class="gt_from_md">Table 1. Dataset Dimensions</span></td>
-    </tr>
-    
-    <tr class="gt_col_headings">
-      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1" scope="col" id="Instances">Instances</th>
-      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1" scope="col" id="Attributes">Attributes</th>
-      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1" scope="col" id="p &amp;gt;&amp;gt; n?">p &gt;&gt; n?</th>
-    </tr>
-  </thead>
-  <tbody class="gt_table_body">
-    <tr><td headers="Instances" class="gt_row gt_center">18,187</td>
-<td headers="Attributes" class="gt_row gt_center">79</td>
-<td headers="p &gt;&gt; n?" class="gt_row gt_center">NO</td></tr>
-  </tbody>
-  
-  
-</table>
 </div>
 </div>
-<div style="transform:scale(0.8);">
-<pre class="r"><code>type_counts &lt;- tibble(
-  Numeric   = sum(map_lgl(orig_data, is.numeric)),
-  Integer   = sum(map_lgl(orig_data, is.integer)),
-  Double    = sum(map_lgl(orig_data, is.double)),
-  Factor    = sum(map_lgl(orig_data, is.factor)),
-  Character = sum(map_lgl(orig_data, is.character)),
-  Logical   = sum(map_lgl(orig_data, is.logical))
-) |&gt;
-  pivot_longer(everything(), names_to = &quot;Type&quot;, values_to = &quot;Count&quot;)
+<div id="clean-and-prepare-the-data" class="section level1">
+<h1>Clean and Prepare the Data</h1>
+<pre class="r"><code>set.seed(5003)
+DROP &lt;- c(&quot;scrape_id&quot;,&quot;host_name&quot;, &quot;host_about&quot;, &quot;host_thumbnail_url&quot;, &quot;host_picture_url&quot;, &quot;id&quot;, &quot;listing_url&quot;, &quot;name&quot;, &quot;description&quot;, &quot;picture_url&quot;, &quot;host_url&quot;, &quot;host_neighbourhood&quot;, &quot;availability_eoy&quot;, &quot;number_of_reviews_ly&quot;, &quot;estimated_occupancy_l365d&quot;, &quot;estimated_revenue_l365d&quot;, &quot;source&quot;, &quot;host_response_time&quot;, &quot;host_response_rate&quot;, &quot;host_is_superhost&quot;, &quot;host_verifications&quot;, &quot;host_has_profile_pic&quot;, &quot;host_identity_verified&quot;,&quot;neighbourhood&quot;, &quot;amenities&quot;,&quot;calendar_updated&quot;, &quot;calendar_last_scraped&quot;,&quot;review_scores_rating&quot;, &quot;review_scores_accuracy&quot;,&quot;review_scores_cleanliness&quot;, &quot;review_scores_checkin&quot;,&quot;review_scores_communication&quot;, &quot;review_scores_location&quot;,&quot;review_scores_value&quot;,&quot;property_type&quot;, &quot;calendar_updated&quot;, &quot;minimum_minimum_nights&quot;, &quot;maximum_minimum_nights&quot;, &quot;minimum_maximum_nights&quot;, &quot;maximum_maximum_nights&quot;, &quot;minimum_nights_avg_ntm&quot;, &quot;maximum_nights_avg_ntm&quot;,&quot;neighbourhood_group_cleansed&quot;, &quot;host_listings_count&quot;, &quot;calculated_host_listings_count_entire_homes&quot;, &quot;calculated_host_listings_count_private_rooms&quot;, &quot;calculated_host_listings_count_shared_rooms&quot;, &quot;last_review&quot;, &quot;neighbourhood_cleansed&quot;,&quot;latitude&quot;, &quot;longitude&quot;, &quot;bathrooms_text&quot;, &quot;host_location&quot;,&quot;host_since&quot;, &quot;first_review&quot;, &quot;last_scraped&quot;,&quot;license&quot;,&quot;has_availability&quot;)
 
-type_counts |&gt;
-  gt() |&gt;
-  tab_header(title = md(&quot;Table 2. Variable Type Counts&quot;)) |&gt;
-  fmt_integer(columns = Count) |&gt;
-  cols_align(align = &quot;center&quot;)</code></pre>
-<div id="pzcyrsoikc" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
-<style>#pzcyrsoikc table {
-font-family: system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
--webkit-font-smoothing: antialiased;
--moz-osx-font-smoothing: grayscale;
-}
-#pzcyrsoikc thead, #pzcyrsoikc tbody, #pzcyrsoikc tfoot, #pzcyrsoikc tr, #pzcyrsoikc td, #pzcyrsoikc th {
-border-style: none;
-}
-#pzcyrsoikc p {
-margin: 0;
-padding: 0;
-}
-#pzcyrsoikc .gt_table {
-display: table;
-border-collapse: collapse;
-line-height: normal;
-margin-left: auto;
-margin-right: auto;
-color: #333333;
-font-size: 16px;
-font-weight: normal;
-font-style: normal;
-background-color: #FFFFFF;
-width: auto;
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #A8A8A8;
-border-right-style: none;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #A8A8A8;
-border-left-style: none;
-border-left-width: 2px;
-border-left-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_caption {
-padding-top: 4px;
-padding-bottom: 4px;
-}
-#pzcyrsoikc .gt_title {
-color: #333333;
-font-size: 125%;
-font-weight: initial;
-padding-top: 4px;
-padding-bottom: 4px;
-padding-left: 5px;
-padding-right: 5px;
-border-bottom-color: #FFFFFF;
-border-bottom-width: 0;
-}
-#pzcyrsoikc .gt_subtitle {
-color: #333333;
-font-size: 85%;
-font-weight: initial;
-padding-top: 3px;
-padding-bottom: 5px;
-padding-left: 5px;
-padding-right: 5px;
-border-top-color: #FFFFFF;
-border-top-width: 0;
-}
-#pzcyrsoikc .gt_heading {
-background-color: #FFFFFF;
-text-align: center;
-border-bottom-color: #FFFFFF;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_bottom_border {
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_col_headings {
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_col_heading {
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: normal;
-text-transform: inherit;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-vertical-align: bottom;
-padding-top: 5px;
-padding-bottom: 6px;
-padding-left: 5px;
-padding-right: 5px;
-overflow-x: hidden;
-}
-#pzcyrsoikc .gt_column_spanner_outer {
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: normal;
-text-transform: inherit;
-padding-top: 0;
-padding-bottom: 0;
-padding-left: 4px;
-padding-right: 4px;
-}
-#pzcyrsoikc .gt_column_spanner_outer:first-child {
-padding-left: 0;
-}
-#pzcyrsoikc .gt_column_spanner_outer:last-child {
-padding-right: 0;
-}
-#pzcyrsoikc .gt_column_spanner {
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-vertical-align: bottom;
-padding-top: 5px;
-padding-bottom: 5px;
-overflow-x: hidden;
-display: inline-block;
-width: 100%;
-}
-#pzcyrsoikc .gt_spanner_row {
-border-bottom-style: hidden;
-}
-#pzcyrsoikc .gt_group_heading {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: initial;
-text-transform: inherit;
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-vertical-align: middle;
-text-align: left;
-}
-#pzcyrsoikc .gt_empty_group_heading {
-padding: 0.5px;
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: initial;
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-vertical-align: middle;
-}
-#pzcyrsoikc .gt_from_md > :first-child {
-margin-top: 0;
-}
-#pzcyrsoikc .gt_from_md > :last-child {
-margin-bottom: 0;
-}
-#pzcyrsoikc .gt_row {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-margin: 10px;
-border-top-style: solid;
-border-top-width: 1px;
-border-top-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 1px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 1px;
-border-right-color: #D3D3D3;
-vertical-align: middle;
-overflow-x: hidden;
-}
-#pzcyrsoikc .gt_stub {
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: initial;
-text-transform: inherit;
-border-right-style: solid;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-padding-left: 5px;
-padding-right: 5px;
-}
-#pzcyrsoikc .gt_stub_row_group {
-color: #333333;
-background-color: #FFFFFF;
-font-size: 100%;
-font-weight: initial;
-text-transform: inherit;
-border-right-style: solid;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-padding-left: 5px;
-padding-right: 5px;
-vertical-align: top;
-}
-#pzcyrsoikc .gt_row_group_first td {
-border-top-width: 2px;
-}
-#pzcyrsoikc .gt_row_group_first th {
-border-top-width: 2px;
-}
-#pzcyrsoikc .gt_summary_row {
-color: #333333;
-background-color: #FFFFFF;
-text-transform: inherit;
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-}
-#pzcyrsoikc .gt_first_summary_row {
-border-top-style: solid;
-border-top-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_first_summary_row.thick {
-border-top-width: 2px;
-}
-#pzcyrsoikc .gt_last_summary_row {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_grand_summary_row {
-color: #333333;
-background-color: #FFFFFF;
-text-transform: inherit;
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-}
-#pzcyrsoikc .gt_first_grand_summary_row {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-border-top-style: double;
-border-top-width: 6px;
-border-top-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_last_grand_summary_row_top {
-padding-top: 8px;
-padding-bottom: 8px;
-padding-left: 5px;
-padding-right: 5px;
-border-bottom-style: double;
-border-bottom-width: 6px;
-border-bottom-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_striped {
-background-color: rgba(128, 128, 128, 0.05);
-}
-#pzcyrsoikc .gt_table_body {
-border-top-style: solid;
-border-top-width: 2px;
-border-top-color: #D3D3D3;
-border-bottom-style: solid;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_footnotes {
-color: #333333;
-background-color: #FFFFFF;
-border-bottom-style: none;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 2px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_footnote {
-margin: 0px;
-font-size: 90%;
-padding-top: 4px;
-padding-bottom: 4px;
-padding-left: 5px;
-padding-right: 5px;
-}
-#pzcyrsoikc .gt_sourcenotes {
-color: #333333;
-background-color: #FFFFFF;
-border-bottom-style: none;
-border-bottom-width: 2px;
-border-bottom-color: #D3D3D3;
-border-left-style: none;
-border-left-width: 2px;
-border-left-color: #D3D3D3;
-border-right-style: none;
-border-right-width: 2px;
-border-right-color: #D3D3D3;
-}
-#pzcyrsoikc .gt_sourcenote {
-font-size: 90%;
-padding-top: 4px;
-padding-bottom: 4px;
-padding-left: 5px;
-padding-right: 5px;
-}
-#pzcyrsoikc .gt_left {
-text-align: left;
-}
-#pzcyrsoikc .gt_center {
-text-align: center;
-}
-#pzcyrsoikc .gt_right {
-text-align: right;
-font-variant-numeric: tabular-nums;
-}
-#pzcyrsoikc .gt_font_normal {
-font-weight: normal;
-}
-#pzcyrsoikc .gt_font_bold {
-font-weight: bold;
-}
-#pzcyrsoikc .gt_font_italic {
-font-style: italic;
-}
-#pzcyrsoikc .gt_super {
-font-size: 65%;
-}
-#pzcyrsoikc .gt_footnote_marks {
-font-size: 75%;
-vertical-align: 0.4em;
-position: initial;
-}
-#pzcyrsoikc .gt_asterisk {
-font-size: 100%;
-vertical-align: 0;
-}
-#pzcyrsoikc .gt_indent_1 {
-text-indent: 5px;
-}
-#pzcyrsoikc .gt_indent_2 {
-text-indent: 10px;
-}
-#pzcyrsoikc .gt_indent_3 {
-text-indent: 15px;
-}
-#pzcyrsoikc .gt_indent_4 {
-text-indent: 20px;
-}
-#pzcyrsoikc .gt_indent_5 {
-text-indent: 25px;
-}
-#pzcyrsoikc .katex-display {
-display: inline-flex !important;
-margin-bottom: 0.75em !important;
-}
-#pzcyrsoikc div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
-height: 0px !important;
-}
-</style>
-<table class="gt_table" data-quarto-disable-processing="false" data-quarto-bootstrap="false">
-  <thead>
-    <tr class="gt_heading">
-      <td colspan="2" class="gt_heading gt_title gt_font_normal gt_bottom_border" style><span class="gt_from_md">Table 2. Variable Type Counts</span></td>
-    </tr>
-    
-    <tr class="gt_col_headings">
-      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1" scope="col" id="Type">Type</th>
-      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1" scope="col" id="Count">Count</th>
-    </tr>
-  </thead>
-  <tbody class="gt_table_body">
-    <tr><td headers="Type" class="gt_row gt_center">Numeric</td>
-<td headers="Count" class="gt_row gt_center">42</td></tr>
-    <tr><td headers="Type" class="gt_row gt_center">Integer</td>
-<td headers="Count" class="gt_row gt_center">27</td></tr>
-    <tr><td headers="Type" class="gt_row gt_center">Double</td>
-<td headers="Count" class="gt_row gt_center">15</td></tr>
-    <tr><td headers="Type" class="gt_row gt_center">Factor</td>
-<td headers="Count" class="gt_row gt_center">0</td></tr>
-    <tr><td headers="Type" class="gt_row gt_center">Character</td>
-<td headers="Count" class="gt_row gt_center">35</td></tr>
-    <tr><td headers="Type" class="gt_row gt_center">Logical</td>
-<td headers="Count" class="gt_row gt_center">2</td></tr>
-  </tbody>
-  
-  
-</table>
+cleaned_data &lt;- orig_data %&gt;%
+  # step 1
+  mutate(bathrooms = coalesce(bathrooms,case_when(str_detect(bathrooms_text, regex(&quot;half&quot;, ignore_case = TRUE)) ~ 0.5,TRUE ~ as.numeric(str_extract(bathrooms_text, &quot;\\d+(?:\\.\\d+)?&quot;)))),
+    host_since = ymd(host_since),
+    first_review = ymd(first_review),
+    last_scraped = ymd(last_scraped),
+    host_tenure = as.numeric(last_scraped - host_since, units = &quot;days&quot;),
+    listing_age = as.numeric(last_scraped - first_review, units = &quot;days&quot;),
+    neighborhood_overview = ifelse(!is.na(neighborhood_overview) &amp; neighborhood_overview != &quot;&quot;, 1, 0),
+    host_acceptance_rate = as.numeric(str_remove(host_acceptance_rate, &quot;%&quot;)),
+    price = as.numeric(str_remove(price, &quot;[$]&quot;)),
+    instant_bookable = as.integer(instant_bookable == &quot;t&quot;),
+    room_type = case_when(room_type == &quot;Entire home/apt&quot; ~ &quot;Entire home/apt&quot;, room_type %in% c(&quot;Hotel room&quot;, &quot;Private room&quot;, &quot;Shared room&quot;) ~ &quot;Non-entire place&quot;,TRUE ~ room_type)) %&gt;%
+  # step 2
+  filter(across(.cols = where(is.numeric) &amp; !any_of(c(&quot;longitude&quot;, &quot;latitude&quot;)), .fns  = ~ is.na(.x) | .x &gt;= 0),
+    price &gt; 0,
+    host_tenure &gt;= listing_age,
+    str_detect(host_location, &quot;Australia&quot;),
+    license != &quot;&quot;,
+    price != &quot;&quot;,
+    has_availability != &quot;&quot;,
+    minimum_nights &lt;= 365)
+
+# step 3
+neigh_coords &lt;- cleaned_data %&gt;%
+  filter(!is.na(longitude), !is.na(latitude), !is.na(neighbourhood_cleansed)) %&gt;%
+  group_by(neighbourhood_cleansed) %&gt;%
+  summarise(
+    avg_lon = mean(longitude, na.rm = TRUE),
+    avg_lat = mean(latitude, na.rm = TRUE),
+    .groups = &quot;drop&quot;)
+km &lt;- kmeans(scale(neigh_coords[, c(&quot;avg_lon&quot;, &quot;avg_lat&quot;)]), centers = 3, nstart = 25)
+neigh_coords$cluster &lt;- factor(km$cluster)
+coords &lt;- neigh_coords[, c(&quot;avg_lon&quot;, &quot;avg_lat&quot;)]
+
+cleaned_data &lt;- cleaned_data %&gt;%
+  left_join(neigh_coords %&gt;% select(neighbourhood_cleansed, cluster), 
+            by = &quot;neighbourhood_cleansed&quot;) %&gt;%
+  mutate(commercial_score = (availability_365 &gt;= 300) + (minimum_nights &lt;= 10) + (host_total_listings_count &gt;= 5) + (instant_bookable == &quot;t&quot;) + (room_type == &quot;Entire home/apt&quot;),
+         rental_type = ifelse(commercial_score &gt;= 3, &quot;commercial&quot;, &quot;occasional&quot;),
+         ,
+             host_acceptance_rate_missing = ifelse(is.na(host_acceptance_rate), 1, 0),
+         host_acceptance_rate = ifelse(is.na(host_acceptance_rate), -1, host_acceptance_rate),
+         beds_missing = ifelse(is.na(beds), 1, 0),
+         bedrooms_missing = ifelse(is.na(bedrooms), 1, 0),
+         bathrooms_missing = ifelse(is.na(bathrooms), 1, 0)) %&gt;%
+  # step 6
+  select(-any_of(DROP))</code></pre>
+<p>We exclude listings with minimum_nights ≥ 365 to align the sample
+with a one-year booking horizon consistent with availability_365. A
+minimum stay of 365 nights effectively denotes long-term lease–style
+policies rather than short-term rentals. Removing these outliers (26
+rows in total) has negligible impact on the dataset while improving
+comparability across features.</p>
 </div>
 <div id="appendix" class="section level1">
 <h1>Appendix</h1>
 <p>Appendix 1: Variable Description</p>
 <p>Appendix 2: Missing Value</p>
 <pre class="r"><code>miss_by_var &lt;- tibble(
-  variable    = names(orig_data),
-  n_missing   = sapply(orig_data, function(x) sum(is.na(x))),
-  pct_missing = 100 * n_missing / nrow(orig_data))
-top20_vars &lt;- miss_by_var %&gt;%
-  arrange(desc(pct_missing), desc(n_missing)) %&gt;%
-  slice_head(n = 20)
-gt(top20_vars) %&gt;%
-  tab_header(title = &quot;Top 20 Variables by Missingness&quot;) %&gt;%
-  fmt_number(columns = pct_missing, decimals = 2)</code></pre>
-<div id="gnsvdohdmp" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
-<style>#gnsvdohdmp table {
+  Variable            = names(orig_data),
+  `Number of Missing` = sapply(orig_data, function(x) sum(is.na(x)))) %&gt;%
+  mutate(`Percentage of Missing` = 100 * `Number of Missing` / nrow(orig_data))
+top15_vars &lt;- miss_by_var %&gt;%
+  arrange(desc(`Percentage of Missing`), desc(`Number of Missing`)) %&gt;%
+  slice_head(n = 15)
+gt(top15_vars) %&gt;%
+  tab_header(title = &quot;Top 15 Variables by Missingness&quot;) %&gt;%
+  fmt_number(columns = `Percentage of Missing`, decimals = 2)</code></pre>
+<div id="xvhwebikox" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>#xvhwebikox table {
 font-family: system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 -webkit-font-smoothing: antialiased;
 -moz-osx-font-smoothing: grayscale;
 }
-#gnsvdohdmp thead, #gnsvdohdmp tbody, #gnsvdohdmp tfoot, #gnsvdohdmp tr, #gnsvdohdmp td, #gnsvdohdmp th {
+#xvhwebikox thead, #xvhwebikox tbody, #xvhwebikox tfoot, #xvhwebikox tr, #xvhwebikox td, #xvhwebikox th {
 border-style: none;
 }
-#gnsvdohdmp p {
+#xvhwebikox p {
 margin: 0;
 padding: 0;
 }
-#gnsvdohdmp .gt_table {
+#xvhwebikox .gt_table {
 display: table;
 border-collapse: collapse;
 line-height: normal;
@@ -1352,11 +651,11 @@ border-left-style: none;
 border-left-width: 2px;
 border-left-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_caption {
+#xvhwebikox .gt_caption {
 padding-top: 4px;
 padding-bottom: 4px;
 }
-#gnsvdohdmp .gt_title {
+#xvhwebikox .gt_title {
 color: #333333;
 font-size: 125%;
 font-weight: initial;
@@ -1367,7 +666,7 @@ padding-right: 5px;
 border-bottom-color: #FFFFFF;
 border-bottom-width: 0;
 }
-#gnsvdohdmp .gt_subtitle {
+#xvhwebikox .gt_subtitle {
 color: #333333;
 font-size: 85%;
 font-weight: initial;
@@ -1378,7 +677,7 @@ padding-right: 5px;
 border-top-color: #FFFFFF;
 border-top-width: 0;
 }
-#gnsvdohdmp .gt_heading {
+#xvhwebikox .gt_heading {
 background-color: #FFFFFF;
 text-align: center;
 border-bottom-color: #FFFFFF;
@@ -1389,12 +688,12 @@ border-right-style: none;
 border-right-width: 1px;
 border-right-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_bottom_border {
+#xvhwebikox .gt_bottom_border {
 border-bottom-style: solid;
 border-bottom-width: 2px;
 border-bottom-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_col_headings {
+#xvhwebikox .gt_col_headings {
 border-top-style: solid;
 border-top-width: 2px;
 border-top-color: #D3D3D3;
@@ -1408,7 +707,7 @@ border-right-style: none;
 border-right-width: 1px;
 border-right-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_col_heading {
+#xvhwebikox .gt_col_heading {
 color: #333333;
 background-color: #FFFFFF;
 font-size: 100%;
@@ -1427,7 +726,7 @@ padding-left: 5px;
 padding-right: 5px;
 overflow-x: hidden;
 }
-#gnsvdohdmp .gt_column_spanner_outer {
+#xvhwebikox .gt_column_spanner_outer {
 color: #333333;
 background-color: #FFFFFF;
 font-size: 100%;
@@ -1438,13 +737,13 @@ padding-bottom: 0;
 padding-left: 4px;
 padding-right: 4px;
 }
-#gnsvdohdmp .gt_column_spanner_outer:first-child {
+#xvhwebikox .gt_column_spanner_outer:first-child {
 padding-left: 0;
 }
-#gnsvdohdmp .gt_column_spanner_outer:last-child {
+#xvhwebikox .gt_column_spanner_outer:last-child {
 padding-right: 0;
 }
-#gnsvdohdmp .gt_column_spanner {
+#xvhwebikox .gt_column_spanner {
 border-bottom-style: solid;
 border-bottom-width: 2px;
 border-bottom-color: #D3D3D3;
@@ -1455,10 +754,10 @@ overflow-x: hidden;
 display: inline-block;
 width: 100%;
 }
-#gnsvdohdmp .gt_spanner_row {
+#xvhwebikox .gt_spanner_row {
 border-bottom-style: hidden;
 }
-#gnsvdohdmp .gt_group_heading {
+#xvhwebikox .gt_group_heading {
 padding-top: 8px;
 padding-bottom: 8px;
 padding-left: 5px;
@@ -1483,7 +782,7 @@ border-right-color: #D3D3D3;
 vertical-align: middle;
 text-align: left;
 }
-#gnsvdohdmp .gt_empty_group_heading {
+#xvhwebikox .gt_empty_group_heading {
 padding: 0.5px;
 color: #333333;
 background-color: #FFFFFF;
@@ -1497,13 +796,13 @@ border-bottom-width: 2px;
 border-bottom-color: #D3D3D3;
 vertical-align: middle;
 }
-#gnsvdohdmp .gt_from_md > :first-child {
+#xvhwebikox .gt_from_md > :first-child {
 margin-top: 0;
 }
-#gnsvdohdmp .gt_from_md > :last-child {
+#xvhwebikox .gt_from_md > :last-child {
 margin-bottom: 0;
 }
-#gnsvdohdmp .gt_row {
+#xvhwebikox .gt_row {
 padding-top: 8px;
 padding-bottom: 8px;
 padding-left: 5px;
@@ -1521,7 +820,7 @@ border-right-color: #D3D3D3;
 vertical-align: middle;
 overflow-x: hidden;
 }
-#gnsvdohdmp .gt_stub {
+#xvhwebikox .gt_stub {
 color: #333333;
 background-color: #FFFFFF;
 font-size: 100%;
@@ -1533,7 +832,7 @@ border-right-color: #D3D3D3;
 padding-left: 5px;
 padding-right: 5px;
 }
-#gnsvdohdmp .gt_stub_row_group {
+#xvhwebikox .gt_stub_row_group {
 color: #333333;
 background-color: #FFFFFF;
 font-size: 100%;
@@ -1546,13 +845,13 @@ padding-left: 5px;
 padding-right: 5px;
 vertical-align: top;
 }
-#gnsvdohdmp .gt_row_group_first td {
+#xvhwebikox .gt_row_group_first td {
 border-top-width: 2px;
 }
-#gnsvdohdmp .gt_row_group_first th {
+#xvhwebikox .gt_row_group_first th {
 border-top-width: 2px;
 }
-#gnsvdohdmp .gt_summary_row {
+#xvhwebikox .gt_summary_row {
 color: #333333;
 background-color: #FFFFFF;
 text-transform: inherit;
@@ -1561,14 +860,14 @@ padding-bottom: 8px;
 padding-left: 5px;
 padding-right: 5px;
 }
-#gnsvdohdmp .gt_first_summary_row {
+#xvhwebikox .gt_first_summary_row {
 border-top-style: solid;
 border-top-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_first_summary_row.thick {
+#xvhwebikox .gt_first_summary_row.thick {
 border-top-width: 2px;
 }
-#gnsvdohdmp .gt_last_summary_row {
+#xvhwebikox .gt_last_summary_row {
 padding-top: 8px;
 padding-bottom: 8px;
 padding-left: 5px;
@@ -1577,7 +876,7 @@ border-bottom-style: solid;
 border-bottom-width: 2px;
 border-bottom-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_grand_summary_row {
+#xvhwebikox .gt_grand_summary_row {
 color: #333333;
 background-color: #FFFFFF;
 text-transform: inherit;
@@ -1586,7 +885,7 @@ padding-bottom: 8px;
 padding-left: 5px;
 padding-right: 5px;
 }
-#gnsvdohdmp .gt_first_grand_summary_row {
+#xvhwebikox .gt_first_grand_summary_row {
 padding-top: 8px;
 padding-bottom: 8px;
 padding-left: 5px;
@@ -1595,7 +894,7 @@ border-top-style: double;
 border-top-width: 6px;
 border-top-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_last_grand_summary_row_top {
+#xvhwebikox .gt_last_grand_summary_row_top {
 padding-top: 8px;
 padding-bottom: 8px;
 padding-left: 5px;
@@ -1604,10 +903,10 @@ border-bottom-style: double;
 border-bottom-width: 6px;
 border-bottom-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_striped {
+#xvhwebikox .gt_striped {
 background-color: rgba(128, 128, 128, 0.05);
 }
-#gnsvdohdmp .gt_table_body {
+#xvhwebikox .gt_table_body {
 border-top-style: solid;
 border-top-width: 2px;
 border-top-color: #D3D3D3;
@@ -1615,7 +914,7 @@ border-bottom-style: solid;
 border-bottom-width: 2px;
 border-bottom-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_footnotes {
+#xvhwebikox .gt_footnotes {
 color: #333333;
 background-color: #FFFFFF;
 border-bottom-style: none;
@@ -1628,7 +927,7 @@ border-right-style: none;
 border-right-width: 2px;
 border-right-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_footnote {
+#xvhwebikox .gt_footnote {
 margin: 0px;
 font-size: 90%;
 padding-top: 4px;
@@ -1636,7 +935,7 @@ padding-bottom: 4px;
 padding-left: 5px;
 padding-right: 5px;
 }
-#gnsvdohdmp .gt_sourcenotes {
+#xvhwebikox .gt_sourcenotes {
 color: #333333;
 background-color: #FFFFFF;
 border-bottom-style: none;
@@ -1649,147 +948,129 @@ border-right-style: none;
 border-right-width: 2px;
 border-right-color: #D3D3D3;
 }
-#gnsvdohdmp .gt_sourcenote {
+#xvhwebikox .gt_sourcenote {
 font-size: 90%;
 padding-top: 4px;
 padding-bottom: 4px;
 padding-left: 5px;
 padding-right: 5px;
 }
-#gnsvdohdmp .gt_left {
+#xvhwebikox .gt_left {
 text-align: left;
 }
-#gnsvdohdmp .gt_center {
+#xvhwebikox .gt_center {
 text-align: center;
 }
-#gnsvdohdmp .gt_right {
+#xvhwebikox .gt_right {
 text-align: right;
 font-variant-numeric: tabular-nums;
 }
-#gnsvdohdmp .gt_font_normal {
+#xvhwebikox .gt_font_normal {
 font-weight: normal;
 }
-#gnsvdohdmp .gt_font_bold {
+#xvhwebikox .gt_font_bold {
 font-weight: bold;
 }
-#gnsvdohdmp .gt_font_italic {
+#xvhwebikox .gt_font_italic {
 font-style: italic;
 }
-#gnsvdohdmp .gt_super {
+#xvhwebikox .gt_super {
 font-size: 65%;
 }
-#gnsvdohdmp .gt_footnote_marks {
+#xvhwebikox .gt_footnote_marks {
 font-size: 75%;
 vertical-align: 0.4em;
 position: initial;
 }
-#gnsvdohdmp .gt_asterisk {
+#xvhwebikox .gt_asterisk {
 font-size: 100%;
 vertical-align: 0;
 }
-#gnsvdohdmp .gt_indent_1 {
+#xvhwebikox .gt_indent_1 {
 text-indent: 5px;
 }
-#gnsvdohdmp .gt_indent_2 {
+#xvhwebikox .gt_indent_2 {
 text-indent: 10px;
 }
-#gnsvdohdmp .gt_indent_3 {
+#xvhwebikox .gt_indent_3 {
 text-indent: 15px;
 }
-#gnsvdohdmp .gt_indent_4 {
+#xvhwebikox .gt_indent_4 {
 text-indent: 20px;
 }
-#gnsvdohdmp .gt_indent_5 {
+#xvhwebikox .gt_indent_5 {
 text-indent: 25px;
 }
-#gnsvdohdmp .katex-display {
+#xvhwebikox .katex-display {
 display: inline-flex !important;
 margin-bottom: 0.75em !important;
 }
-#gnsvdohdmp div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
+#xvhwebikox div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
 height: 0px !important;
 }
 </style>
 <table class="gt_table" data-quarto-disable-processing="false" data-quarto-bootstrap="false">
   <thead>
     <tr class="gt_heading">
-      <td colspan="3" class="gt_heading gt_title gt_font_normal gt_bottom_border" style>Top 20 Variables by Missingness</td>
+      <td colspan="3" class="gt_heading gt_title gt_font_normal gt_bottom_border" style>Top 15 Variables by Missingness</td>
     </tr>
     
     <tr class="gt_col_headings">
-      <th class="gt_col_heading gt_columns_bottom_border gt_left" rowspan="1" colspan="1" scope="col" id="variable">variable</th>
-      <th class="gt_col_heading gt_columns_bottom_border gt_right" rowspan="1" colspan="1" scope="col" id="n_missing">n_missing</th>
-      <th class="gt_col_heading gt_columns_bottom_border gt_right" rowspan="1" colspan="1" scope="col" id="pct_missing">pct_missing</th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_left" rowspan="1" colspan="1" scope="col" id="Variable">Variable</th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_right" rowspan="1" colspan="1" scope="col" id="Number of Missing">Number of Missing</th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_right" rowspan="1" colspan="1" scope="col" id="Percentage of Missing">Percentage of Missing</th>
     </tr>
   </thead>
   <tbody class="gt_table_body">
-    <tr><td headers="variable" class="gt_row gt_left">neighbourhood_group_cleansed</td>
-<td headers="n_missing" class="gt_row gt_right">18187</td>
-<td headers="pct_missing" class="gt_row gt_right">100.00</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">calendar_updated</td>
-<td headers="n_missing" class="gt_row gt_right">18187</td>
-<td headers="pct_missing" class="gt_row gt_right">100.00</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">review_scores_accuracy</td>
-<td headers="n_missing" class="gt_row gt_right">3181</td>
-<td headers="pct_missing" class="gt_row gt_right">17.49</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">review_scores_checkin</td>
-<td headers="n_missing" class="gt_row gt_right">3181</td>
-<td headers="pct_missing" class="gt_row gt_right">17.49</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">review_scores_location</td>
-<td headers="n_missing" class="gt_row gt_right">3181</td>
-<td headers="pct_missing" class="gt_row gt_right">17.49</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">review_scores_value</td>
-<td headers="n_missing" class="gt_row gt_right">3181</td>
-<td headers="pct_missing" class="gt_row gt_right">17.49</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">review_scores_cleanliness</td>
-<td headers="n_missing" class="gt_row gt_right">3180</td>
-<td headers="pct_missing" class="gt_row gt_right">17.49</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">review_scores_communication</td>
-<td headers="n_missing" class="gt_row gt_right">3180</td>
-<td headers="pct_missing" class="gt_row gt_right">17.49</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">review_scores_rating</td>
-<td headers="n_missing" class="gt_row gt_right">3179</td>
-<td headers="pct_missing" class="gt_row gt_right">17.48</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">reviews_per_month</td>
-<td headers="n_missing" class="gt_row gt_right">3179</td>
-<td headers="pct_missing" class="gt_row gt_right">17.48</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">beds</td>
-<td headers="n_missing" class="gt_row gt_right">2493</td>
-<td headers="pct_missing" class="gt_row gt_right">13.71</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">bathrooms</td>
-<td headers="n_missing" class="gt_row gt_right">2458</td>
-<td headers="pct_missing" class="gt_row gt_right">13.52</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">estimated_revenue_l365d</td>
-<td headers="n_missing" class="gt_row gt_right">2453</td>
-<td headers="pct_missing" class="gt_row gt_right">13.49</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">bedrooms</td>
-<td headers="n_missing" class="gt_row gt_right">436</td>
-<td headers="pct_missing" class="gt_row gt_right">2.40</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">host_listings_count</td>
-<td headers="n_missing" class="gt_row gt_right">5</td>
-<td headers="pct_missing" class="gt_row gt_right">0.03</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">host_total_listings_count</td>
-<td headers="n_missing" class="gt_row gt_right">5</td>
-<td headers="pct_missing" class="gt_row gt_right">0.03</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">id</td>
-<td headers="n_missing" class="gt_row gt_right">0</td>
-<td headers="pct_missing" class="gt_row gt_right">0.00</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">listing_url</td>
-<td headers="n_missing" class="gt_row gt_right">0</td>
-<td headers="pct_missing" class="gt_row gt_right">0.00</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">scrape_id</td>
-<td headers="n_missing" class="gt_row gt_right">0</td>
-<td headers="pct_missing" class="gt_row gt_right">0.00</td></tr>
-    <tr><td headers="variable" class="gt_row gt_left">last_scraped</td>
-<td headers="n_missing" class="gt_row gt_right">0</td>
-<td headers="pct_missing" class="gt_row gt_right">0.00</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">neighbourhood_group_cleansed</td>
+<td headers="Number of Missing" class="gt_row gt_right">18187</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">100.00</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">calendar_updated</td>
+<td headers="Number of Missing" class="gt_row gt_right">18187</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">100.00</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">review_scores_accuracy</td>
+<td headers="Number of Missing" class="gt_row gt_right">3181</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">17.49</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">review_scores_checkin</td>
+<td headers="Number of Missing" class="gt_row gt_right">3181</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">17.49</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">review_scores_location</td>
+<td headers="Number of Missing" class="gt_row gt_right">3181</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">17.49</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">review_scores_value</td>
+<td headers="Number of Missing" class="gt_row gt_right">3181</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">17.49</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">review_scores_cleanliness</td>
+<td headers="Number of Missing" class="gt_row gt_right">3180</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">17.49</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">review_scores_communication</td>
+<td headers="Number of Missing" class="gt_row gt_right">3180</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">17.49</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">review_scores_rating</td>
+<td headers="Number of Missing" class="gt_row gt_right">3179</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">17.48</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">reviews_per_month</td>
+<td headers="Number of Missing" class="gt_row gt_right">3179</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">17.48</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">beds</td>
+<td headers="Number of Missing" class="gt_row gt_right">2493</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">13.71</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">bathrooms</td>
+<td headers="Number of Missing" class="gt_row gt_right">2458</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">13.52</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">estimated_revenue_l365d</td>
+<td headers="Number of Missing" class="gt_row gt_right">2453</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">13.49</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">bedrooms</td>
+<td headers="Number of Missing" class="gt_row gt_right">436</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">2.40</td></tr>
+    <tr><td headers="Variable" class="gt_row gt_left">host_listings_count</td>
+<td headers="Number of Missing" class="gt_row gt_right">5</td>
+<td headers="Percentage of Missing" class="gt_row gt_right">0.03</td></tr>
   </tbody>
   
   
 </table>
-</div>
-</div>
-</div>
 </div>
 </div>
 
@@ -1826,6 +1107,11 @@ $(document).ready(function () {
 </script>
 
 <!-- code folding -->
+<script>
+$(document).ready(function () {
+  window.initializeCodeFolding("hide" === "show");
+});
+</script>
 
 
 <!-- dynamically load mathjax for compatibility with self-contained -->

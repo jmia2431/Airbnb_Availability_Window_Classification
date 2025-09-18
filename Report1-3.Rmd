@@ -4,9 +4,10 @@ author: "Mia, Junyi"
 date: "2025-09-15"
 output:
   html_document:
+    code_folding: hide
 ---
 
-```{r library setup}
+```{r setup, message=FALSE, warning=FALSE}
 library(dplyr)
 library(knitr)
 library(purrr)
@@ -20,12 +21,7 @@ library(gt)
 library(lubridate)
 library(factoextra)
 library(stringr)
-warning(FALSE)
-```
-
-```{r data import}
 orig_data = read.csv("datasets/listings.csv")
-dictionary = read.csv("datasets/InsideAirbnbDataDictionarylistings.csvdetailv4.3.csv")
 ```
 
 # Define the Problem
@@ -37,7 +33,7 @@ dictionary = read.csv("datasets/InsideAirbnbDataDictionarylistings.csvdetailv4.3
 **Relevance to Sydney and Australia:** Airbnb has a notable impact on Sydney’s housing market, where affordability is already a pressing issue. The growth of commercial short-term rentals reduces long-term housing supply and raises pressure on tenants. By classifying listings into commercial and occasional categories, this study highlights the scale of professional operations in Sydney and offers evidence to support housing policy in New South Wales and Australia.
 
 # Describe the Data
-```{r Describe the Data}
+```{r Describe the Data, message=FALSE, warning=FALSE}
 observations = dim(orig_data)[1]
 variables = dim(orig_data)[2]
 numeric = sum(sapply(orig_data, is.numeric)) 
@@ -46,7 +42,7 @@ double = sum(sapply(orig_data, is.double))
 categorical = sum(sapply(orig_data, is.character)) 
 logical = sum(sapply(orig_data, is.logical))
 uniques <- sapply(orig_data, function(x) n_distinct(x, na.rm = TRUE))
-maxunique     <- max(uniques)
+maxunique <- max(uniques)
 maxuniquename <- names(uniques)[which.max(uniques)]
 overall_missing_pct <- round((sum(is.na(orig_data))/(nrow(orig_data)*ncol(orig_data)))*100,2)
 ```
@@ -64,20 +60,16 @@ Dependent variable: binary categorical variable indicating rental type. This var
 
 ## Data Challenges
 Large number of variables results in high dimensionality, complicate both exploration and modelling. In particular, the presence of high-cardinality categorical variable(e.g., `listing_url`and`amenities`) risked inflating dimensionality without contributing meaningful predictive values. The coexistence of heterogeneous data types necessitates careful preprocessing to ensure model compatibility and reliable downstream analysis. The dataset shows a moderate overall missing rate of `r overall_missing_pct`, but this is unevenly distributed across features. A small subset of variables accounts for the majority of gaps, with some exhibiting substantial missingness(Appendix 2).
+
 # Clean and Prepare the Data
 
-We exclude listings with minimum_nights ≥ 365 to align the sample with a one-year booking horizon consistent with availability_365. A minimum stay of 365 nights effectively denotes long-term lease–style policies rather than short-term rentals. Removing these outliers (26 rows in total) has negligible impact on the dataset while improving comparability across features.
-```{r}
-filter_vars <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review")
+```{r Clean and Prepare the Data, warning=FALSE}
+set.seed(5003)
+DROP <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review", "neighbourhood_cleansed","latitude", "longitude", "bathrooms_text", "host_location","host_since", "first_review", "last_scraped","license","has_availability")
 
 cleaned_data <- orig_data %>%
-  select(-any_of(filter_vars)) %>%
-  mutate(
-    bathrooms = coalesce(
-      bathrooms,
-      case_when(
-        str_detect(bathrooms_text, regex("half", ignore_case = TRUE)) ~ 0.5,
-        TRUE ~ as.numeric(str_extract(bathrooms_text, "\\d+(?:\\.\\d+)?")))),
+  # step 1
+  mutate(bathrooms = coalesce(bathrooms,case_when(str_detect(bathrooms_text, regex("half", ignore_case = TRUE)) ~ 0.5,TRUE ~ as.numeric(str_extract(bathrooms_text, "\\d+(?:\\.\\d+)?")))),
     host_since = ymd(host_since),
     first_review = ymd(first_review),
     last_scraped = ymd(last_scraped),
@@ -86,18 +78,19 @@ cleaned_data <- orig_data %>%
     neighborhood_overview = ifelse(!is.na(neighborhood_overview) & neighborhood_overview != "", 1, 0),
     host_acceptance_rate = as.numeric(str_remove(host_acceptance_rate, "%")),
     price = as.numeric(str_remove(price, "[$]")),
-    instant_bookable = as.integer(instant_bookable == "t")) %>%
+    instant_bookable = as.integer(instant_bookable == "t"),
+    room_type = case_when(room_type == "Entire home/apt" ~ "Entire home/apt", room_type %in% c("Hotel room", "Private room", "Shared room") ~ "Non-entire place",TRUE ~ room_type)) %>%
+  # step 2
+  filter(across(.cols = where(is.numeric) & !any_of(c("longitude", "latitude")), .fns  = ~ is.na(.x) | .x >= 0),
+    price > 0,
+    host_tenure >= listing_age,
+    str_detect(host_location, "Australia"),
+    license != "",
+    price != "",
+    has_availability != "",
+    minimum_nights <= 365)
 
-  filter(str_detect(host_location, "Australia"),
-         license != "",
-         price != "",
-         has_availability != "",
-         minimum_nights <= 365,
-         across(.cols = where(is.numeric) & !any_of(c("longitude", "latitude")), .fns  = ~ is.na(.x) | .x >= 0),
-         price > 0,
-         host_tenure >= listing_age)
-
-set.seed(5003)
+# step 3
 neigh_coords <- cleaned_data %>%
   filter(!is.na(longitude), !is.na(latitude), !is.na(neighbourhood_cleansed)) %>%
   group_by(neighbourhood_cleansed) %>%
@@ -110,29 +103,23 @@ neigh_coords$cluster <- factor(km$cluster)
 coords <- neigh_coords[, c("avg_lon", "avg_lat")]
 
 cleaned_data <- cleaned_data %>%
-  mutate(
-    room_type = case_when(room_type == "Entire home/apt" ~ "Entire home/apt",
-                          room_type %in% c("Hotel room", "Private room", "Shared room") ~ "Non-entire place",
-                          TRUE ~ room_type),
-    commercial_score =
-      (availability_365 >= 300) +
-      (minimum_nights <= 10) +
-      (host_total_listings_count >= 5) +
-      (instant_bookable == "t") +
-      (room_type == "Entire home/apt"),
-    rental_type = ifelse(commercial_score >= 3, "commercial", "occasional"),
-    host_acceptance_rate_missing = ifelse(is.na(host_acceptance_rate), 1, 0),
-    host_acceptance_rate = ifelse(is.na(host_acceptance_rate), -1, host_acceptance_rate),
-    beds_missing = ifelse(is.na(beds), 1, 0),
-    bedrooms_missing = ifelse(is.na(bedrooms), 1, 0),
-    bathrooms_missing = ifelse(is.na(bathrooms), 1, 0)) %>%
   left_join(neigh_coords %>% select(neighbourhood_cleansed, cluster), 
             by = "neighbourhood_cleansed") %>%
-  select(-c("neighbourhood_cleansed","latitude", "longitude", "bathrooms_text", "host_location","host_since", "first_review", "last_scraped","license","has_availability"))
+  mutate(commercial_score = (availability_365 >= 300) + (minimum_nights <= 10) + (host_total_listings_count >= 5) + (instant_bookable == "t") + (room_type == "Entire home/apt"),
+         rental_type = ifelse(commercial_score >= 3, "commercial", "occasional"),
+         ,
+             host_acceptance_rate_missing = ifelse(is.na(host_acceptance_rate), 1, 0),
+         host_acceptance_rate = ifelse(is.na(host_acceptance_rate), -1, host_acceptance_rate),
+         beds_missing = ifelse(is.na(beds), 1, 0),
+         bedrooms_missing = ifelse(is.na(bedrooms), 1, 0),
+         bathrooms_missing = ifelse(is.na(bathrooms), 1, 0)) %>%
+  # step 6
+  select(-any_of(DROP))
 ```
+We exclude listings with minimum_nights ≥ 365 to align the sample with a one-year booking horizon consistent with availability_365. A minimum stay of 365 nights effectively denotes long-term lease–style policies rather than short-term rentals. Removing these outliers (26 rows in total) has negligible impact on the dataset while improving comparability across features.
 
 
-# Appendix
+# Reference & Appendix
 Appendix 1: Variable Description
 ```{r Appendix 1}
 

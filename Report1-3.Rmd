@@ -114,14 +114,14 @@ cleaned_data <- cleaned_data %>%
          beds_missing = ifelse(is.na(beds), 1, 0),
          bedrooms_missing = ifelse(is.na(bedrooms), 1, 0),
          bathrooms_missing = ifelse(is.na(bathrooms), 1, 0)) %>%
-  # step 6
+  # step e4
   select(-any_of(DROP))
 ```
 We exclude listings with minimum_nights ≥ 365 to align the sample with a one-year booking horizon consistent with availability_365. A minimum stay of 365 nights effectively denotes long-term lease–style policies rather than short-term rentals. Removing these outliers (26 rows in total) has negligible impact on the dataset while improving comparability across features.
 
 
 # Reference & Appendix
-Inside Airbnb. (2025). Inside Airbnb - Data source. http://insideairbnb.com
+Inside Airbnb. (2025). *Inside Airbnb - Data source.* Retrieved from <http://insideairbnb.com>
 
 Appendix 1: Variables with Any Missingness
 ```{r Appendix 2, message= FALSE, fig.width=4, fig.height=3}

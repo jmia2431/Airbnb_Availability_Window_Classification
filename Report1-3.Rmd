@@ -17,7 +17,7 @@ library(tidyverse)
 library(janitor)
 library(skimr)
 library(caret)
-library(gt)
+library(kableExtra)
 library(lubridate)
 library(factoextra)
 library(stringr)
@@ -41,6 +41,7 @@ integer = sum(sapply(orig_data, is.integer))
 double = sum(sapply(orig_data, is.double)) 
 categorical = sum(sapply(orig_data, is.character)) 
 logical = sum(sapply(orig_data, is.logical))
+cate_total = categorical + logical
 uniques <- sapply(orig_data, function(x) n_distinct(x, na.rm = TRUE))
 maxunique <- max(uniques)
 maxuniquename <- names(uniques)[which.max(uniques)]
@@ -48,10 +49,10 @@ overall_missing_pct <- round((sum(is.na(orig_data))/(nrow(orig_data)*ncol(orig_d
 ```
 
 ## Data Source
-The dataset for comes from Inside Airbnb(reference 1), an independent project that collects and publishes Airbnb data on housing impacts. The data are obtained through web scraping and are publicly accessible. For this study, we use the detailed listings data for Sydney, New South Wales, dated 10 June 2025.
+The dataset for comes from Inside Airbnb(Inside Airbnb, 2025), an independent project that collects and publishes Airbnb data on housing impacts. The data are obtained through web scraping and are publicly accessible. For this study, we use the detailed listings data for Sydney, New South Wales, dated 10 June 2025.
 
 ## Data Description
-The Sydney Airbnb dataset contains `r observations` observations and `r variables `variables, making it a tall dataset with more listings than attributes. Among the variables, `r numeric` are numeric (`r integer`) integer and `r double` double), `r categorical` are categorical, and `r logical` are logical. This mix of quantitative and qualitative features provides the basis for classification. **A complete listing of variables is provided in Appendix 1?.**
+The Sydney Airbnb dataset contains `r observations` observations and `r variables `variables, making it a tall dataset with more listings than attributes. Among the variables, `r numeric` are numeric (`r integer` integer and `r double` double), `r cate_total` are categorical(including `r logical` logical variables). This mix of quantitative and qualitative features provides the basis for classification.
 
 The categorical variables vary greatly in distinct values. Some are binary, while others are high-cardinality with up to `r maxunique` unique values (e.g., identifiers such as `r maxuniquename`). None show zero variance, meaning all contribute some differentiation across listings.
 
@@ -59,7 +60,7 @@ The categorical variables vary greatly in distinct values. Some are binary, whil
 Dependent variable: binary categorical variable indicating rental type. This variable contain two outcome which is commercial where there’s always available, entire unit, multiple listings by host and occasional where there’s limited availability, host-occupied, fewer listings. Yet this metric it not in the raw data, we will construct it using `availability_365`, `minimum_nights`, `host_total_listings_count` and `instant_bookable`.
 
 ## Data Challenges
-Large number of variables results in high dimensionality, complicate both exploration and modelling. In particular, the presence of high-cardinality categorical variable(e.g., `listing_url`and`amenities`) risked inflating dimensionality without contributing meaningful predictive values. The coexistence of heterogeneous data types necessitates careful preprocessing to ensure model compatibility and reliable downstream analysis. The dataset shows a moderate overall missing rate of `r overall_missing_pct`, but this is unevenly distributed across features. A small subset of variables accounts for the majority of gaps, with some exhibiting substantial missingness(Appendix 2).
+Large number of variables results in high dimensionality, complicate both exploration and modelling. In particular, the presence of high-cardinality categorical variable(e.g., `listing_url`and`amenities`) risked inflating dimensionality without contributing meaningful predictive values. The coexistence of heterogeneous data types necessitates careful preprocessing to ensure model compatibility and reliable downstream analysis. The dataset shows a moderate overall missing rate of `r overall_missing_pct`, but this is unevenly distributed across features. A small subset of variables accounts for the majority of gaps, with some exhibiting substantial missingness(Appendix 1).
 
 # Clean and Prepare the Data
 
@@ -120,22 +121,27 @@ We exclude listings with minimum_nights ≥ 365 to align the sample with a one-y
 
 
 # Reference & Appendix
-Appendix 1: Variable Description
-```{r Appendix 1}
+Inside Airbnb. (2025). Inside Airbnb - Data source. http://insideairbnb.com
 
-```
+Appendix 1: Variables with Any Missingness
+```{r Appendix 2, message= FALSE, fig.width=4, fig.height=3}
+miss_df <- tibble(
+  var = names(orig_data),
+  miss_n = sapply(orig_data, function(x) sum(is.na(x))),
+  miss_pct = sapply(orig_data, function(x) mean(is.na(x)))
+) %>%
+  arrange(desc(miss_pct), desc(miss_n))
 
-Appendix 2: Missing Value
-```{r Appendix 2}
-miss_by_var <- tibble(
-  Variable            = names(orig_data),
-  `Number of Missing` = sapply(orig_data, function(x) sum(is.na(x)))) %>%
-  mutate(`Percentage of Missing` = 100 * `Number of Missing` / nrow(orig_data))
-top15_vars <- miss_by_var %>%
-  arrange(desc(`Percentage of Missing`), desc(`Number of Missing`)) %>%
-  slice_head(n = 15)
-gt(top15_vars) %>%
-  tab_header(title = "Top 15 Variables by Missingness") %>%
-  fmt_number(columns = `Percentage of Missing`, decimals = 2)
+vars_has_miss <- miss_df %>% filter(miss_n > 0) %>% pull(var)
+
+p_has <- orig_data %>%
+  select(all_of(vars_has_miss)) %>%
+  gg_miss_var(show_pct = TRUE) +
+  coord_flip() +
+  labs(title = "Variables with Any Missingness") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_minimal(base_size = 9) +
+  theme(axis.text.y = element_text(size = 7))
+p_has
 ```
 

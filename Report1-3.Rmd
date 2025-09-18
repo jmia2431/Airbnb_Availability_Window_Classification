@@ -65,108 +65,70 @@ Dependent variable: binary categorical variable indicating rental type. This var
 ## Data Challenges
 Large number of variables results in high dimensionality, complicate both exploration and modelling. In particular, the presence of high-cardinality categorical variable(e.g., `listing_url`and`amenities`) risked inflating dimensionality without contributing meaningful predictive values. The coexistence of heterogeneous data types necessitates careful preprocessing to ensure model compatibility and reliable downstream analysis. The dataset shows a moderate overall missing rate of `r overall_missing_pct`, but this is unevenly distributed across features. A small subset of variables accounts for the majority of gaps, with some exhibiting substantial missingness(Appendix 2).
 # Clean and Prepare the Data
-```{r cleaning and prepare the data}
-set.seed(5003)
+
+We exclude listings with minimum_nights ≥ 365 to align the sample with a one-year booking horizon consistent with availability_365. A minimum stay of 365 nights effectively denotes long-term lease–style policies rather than short-term rentals. Removing these outliers (26 rows in total) has negligible impact on the dataset while improving comparability across features.
+```{r}
+filter_vars <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review")
+
 cleaned_data <- orig_data %>%
-  # (1) drop clearly irrelevant, high-cardinality ,empty and PII columns to reduce noise and width.
-  select(-any_of(c(
-    "scrape_id","host_name","host_about","host_thumbnail_url","host_picture_url","id",
-    "listing_url","name","description","picture_url","host_url","host_neighbourhood",
-    "availability_eoy","number_of_reviews_ly","estimated_occupancy_l365d",
-    "estimated_revenue_l365d","source","host_response_time","host_response_rate",
-    "host_is_superhost","host_verifications","host_has_profile_pic",
-    "host_identity_verified","neighbourhood","amenities","calendar_updated",
-    "calendar_last_scraped","review_scores_rating","review_scores_accuracy",
-    "review_scores_cleanliness","review_scores_checkin","review_scores_communication",
-    "review_scores_location","review_scores_value","property_type","minimum_minimum_nights",
-    "maximum_minimum_nights","minimum_maximum_nights","maximum_maximum_nights",
-    "minimum_nights_avg_ntm","maximum_nights_avg_ntm","neighbourhood_group_cleansed",
-    "host_listings_count","calculated_host_listings_count_entire_homes",
-    "calculated_host_listings_count_private_rooms",
-    "calculated_host_listings_count_shared_rooms","last_review"
-  ))) %>%
-  # (2) feature engineering and type fixed
-  # bathrooms: prefer numeric; fallback to parse from text and handle "half".
-  # parse dates; compute tenures as day counts for modelling.
+  select(-any_of(filter_vars)) %>%
   mutate(
-    bathrooms = coalesce(bathrooms,case_when(str_detect(coalesce(bathrooms_text, ""), regex("half", ignore_case = TRUE)) ~ 0.5, TRUE ~ as.numeric(str_extract(coalesce(bathrooms_text, ""), "\\d+(?:\\.\\d+)?")))),
-    host_since   = ymd(host_since),
+    bathrooms = coalesce(
+      bathrooms,
+      case_when(
+        str_detect(bathrooms_text, regex("half", ignore_case = TRUE)) ~ 0.5,
+        TRUE ~ as.numeric(str_extract(bathrooms_text, "\\d+(?:\\.\\d+)?")))),
+    host_since = ymd(host_since),
     first_review = ymd(first_review),
     last_scraped = ymd(last_scraped),
-    host_tenure  = as.numeric(last_scraped - host_since, units = "days"),
-    listing_age  = as.numeric(last_scraped - first_review, units = "days")
-  ) %>%
-  # (3) 
-  filter(
-    str_detect(coalesce(host_location, ""), "Australia"),
-    license != "",
-    price   != "",
-    has_availability != "",
-    minimum_nights <= 365
-  ) %>%
+    host_tenure = as.numeric(last_scraped - host_since, units = "days"),
+    listing_age = as.numeric(last_scraped - first_review, units = "days"),
+    neighborhood_overview = ifelse(!is.na(neighborhood_overview) & neighborhood_overview != "", 1, 0),
+    host_acceptance_rate = as.numeric(str_remove(host_acceptance_rate, "%")),
+    price = as.numeric(str_remove(price, "[$]")),
+    instant_bookable = as.integer(instant_bookable == "t")) %>%
 
-  # 4) 丢弃已无用的中间列
-  select(-any_of(c(
-    "bathrooms_text","host_location","host_since","first_review","last_scraped",
-    "license","has_availability"
-  ))) %>%
+  filter(str_detect(host_location, "Australia"),
+         license != "",
+         price != "",
+         has_availability != "",
+         minimum_nights <= 365,
+         across(.cols = where(is.numeric) & !any_of(c("longitude", "latitude")), .fns  = ~ is.na(.x) | .x >= 0),
+         price > 0,
+         host_tenure >= listing_age)
 
-  # 5) 进一步清洗与规范化
+set.seed(5003)
+neigh_coords <- cleaned_data %>%
+  filter(!is.na(longitude), !is.na(latitude), !is.na(neighbourhood_cleansed)) %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(
+    avg_lon = mean(longitude, na.rm = TRUE),
+    avg_lat = mean(latitude, na.rm = TRUE),
+    .groups = "drop")
+km <- kmeans(scale(neigh_coords[, c("avg_lon", "avg_lat")]), centers = 3, nstart = 25)
+neigh_coords$cluster <- factor(km$cluster)
+coords <- neigh_coords[, c("avg_lon", "avg_lat")]
+
+cleaned_data <- cleaned_data %>%
   mutate(
-    neighborhood_overview = if_else(!is.na(neighborhood_overview) & neighborhood_overview != "", 1L, 0L),
-    host_acceptance_rate  = as.numeric(str_remove(host_acceptance_rate, "%")),
-    price                 = as.numeric(str_remove(str_remove(price, "[$]"), ",")),
-    instant_bookable      = as.integer(instant_bookable == "t"),
-    room_type = case_when(
-      room_type == "Entire home/apt" ~ "Entire home/apt",
-      room_type %in% c("Hotel room","Private room","Shared room") ~ "Non-entire place",
-      TRUE ~ room_type
-    )
-  ) %>%
-
-  # 6) 数值列约束（排除经纬度）；以及逻辑过滤
-  filter(
-    if_all(c(where(is.numeric), -all_of(c("longitude","latitude"))),
-           ~ is.na(.x) | .x >= 0),
-    price > 0,
-    host_tenure >= listing_age
-  ) %>%
-
-  # 7) 内联计算邻里聚类表，并回填 cluster
-  left_join(
-    {
-      tmp <- . %>%
-        filter(!is.na(longitude), !is.na(latitude), !is.na(neighbourhood_cleansed)) %>%
-        group_by(neighbourhood_cleansed) %>%
-        summarise(
-          avg_lon = mean(longitude, na.rm = TRUE),
-          avg_lat = mean(latitude, na.rm = TRUE),
-          .groups = "drop"
-        )
-      km <- kmeans(scale(dplyr::select(tmp, avg_lon, avg_lat)),
-                   centers = 3, nstart = 25)
-      tmp %>%
-        mutate(cluster = factor(km$cluster)) %>%
-        select(neighbourhood_cleansed, cluster)
-    },
-    by = "neighbourhood_cleansed"
-  ) %>%
-
-  # 8) 打商业化得分与标签（按行求和更稳，自动跳过 NA）
-  mutate(
-    commercial_score = rowSums(cbind(
-      availability_365 >= 300,
-      minimum_nights <= 10,
-      host_total_listings_count >= 5,
-      instant_bookable == 1,
-      room_type == "Entire home/apt"
-    ), na.rm = TRUE),
-    rental_type = if_else(commercial_score >= 3, "commercial", "occasional")
-  ) %>%
-
-  # 9) 最后再丢坐标与 join 键
-  select(-any_of(c("neighbourhood_cleansed","latitude","longitude")))
-
+    room_type = case_when(room_type == "Entire home/apt" ~ "Entire home/apt",
+                          room_type %in% c("Hotel room", "Private room", "Shared room") ~ "Non-entire place",
+                          TRUE ~ room_type),
+    commercial_score =
+      (availability_365 >= 300) +
+      (minimum_nights <= 10) +
+      (host_total_listings_count >= 5) +
+      (instant_bookable == "t") +
+      (room_type == "Entire home/apt"),
+    rental_type = ifelse(commercial_score >= 3, "commercial", "occasional"),
+    host_acceptance_rate_missing = ifelse(is.na(host_acceptance_rate), 1, 0),
+    host_acceptance_rate = ifelse(is.na(host_acceptance_rate), -1, host_acceptance_rate),
+    beds_missing = ifelse(is.na(beds), 1, 0),
+    bedrooms_missing = ifelse(is.na(bedrooms), 1, 0),
+    bathrooms_missing = ifelse(is.na(bathrooms), 1, 0)) %>%
+  left_join(neigh_coords %>% select(neighbourhood_cleansed, cluster), 
+            by = "neighbourhood_cleansed") %>%
+  select(-c("neighbourhood_cleansed","latitude", "longitude", "bathrooms_text", "host_location","host_since", "first_review", "last_scraped","license","has_availability"))
 ```
 
 

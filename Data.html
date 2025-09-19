@@ -357,7 +357,163 @@ display: none;
 </div>
 
 
+<pre class="r"><code>library(readxl)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(zoo)
 
+file_path &lt;- &quot;Dataset/ABS Labour Force Survey.xlsx&quot;
+sheet_ids &lt;- 2:11
+
+meta_rows &lt;- c(
+  &quot;Unit&quot;,&quot;Series Type&quot;,&quot;Data Type&quot;,&quot;Frequency&quot;,&quot;Collection Month&quot;,
+  &quot;Series Start&quot;,&quot;Series End&quot;,&quot;No. Obs&quot;,&quot;Series ID&quot;
+)
+
+dfs &lt;- lapply(sheet_ids, function(i) {
+  df &lt;- read_excel(file_path, sheet = i, col_names = TRUE)
+  firstcol &lt;- names(df)[1]
+  df &lt;- df %&gt;%
+    filter(!(as.character(.data[[firstcol]]) %in% meta_rows)) %&gt;% 
+    filter(!if_all(everything(), ~ is.na(.x)))
+  df
+})
+
+orig_data &lt;- dfs[[1]]
+for (j in 2:length(dfs)) {
+  orig_data &lt;- cbind(orig_data, dfs[[j]][, -1, drop = FALSE])
+}
+
+cols &lt;- names(orig_data)
+cols_with_persons &lt;- grep(&quot;Persons&quot;, cols, value = TRUE, ignore.case = TRUE)
+step1 &lt;- orig_data %&gt;%
+  select(-all_of(cols_with_persons))
+
+library(dplyr)
+library(stringr)
+library(tibble)
+
+cols &lt;- names(step1)
+step2 &lt;- tibble(
+  OriginalName = cols,
+  Tokens = strsplit(str_replace_all(cols, &quot;[;&gt;/]+&quot;, &quot;;&quot;), &quot;;&quot;)
+) %&gt;%
+  rowwise() %&gt;%
+  mutate(Tokens = list(trimws(Tokens))) %&gt;%
+  ungroup()
+
+is_sex &lt;- function(x) str_to_title(x) %in% c(&quot;Males&quot;,&quot;Females&quot;)
+is_marital &lt;- function(x) str_detect(str_to_lower(x), &quot;\\bmarried\\b&quot;)
+is_population_base &lt;- function(x) {
+  lx &lt;- str_to_lower(x)
+  str_detect(lx, &quot;civilian population|population aged .* and over&quot;)}
+is_agegroup &lt;- function(x) {
+  lx &lt;- str_to_lower(x)
+  str_detect(lx, &quot;years&quot;) &amp;&amp; !is_population_base(x)}
+
+is_employment &lt;- function(x) {
+  patt &lt;- paste(
+    &quot;\\bemployed\\b&quot;,
+    &quot;\\bunemployed\\b&quot;,
+    &quot;full[- ]?time&quot;,
+    &quot;part[- ]?time&quot;,
+    &quot;labou?r\\s+force&quot;,
+    &quot;not\\s+in\\s+the\\s+labou?r\\s+force&quot;,
+    &quot;\\bnilf\\b&quot;,
+    &quot;participation\\s+rate&quot;,
+    &quot;employment\\s+rate&quot;,
+    &quot;unemployment\\s+rate&quot;,
+    &quot;employment\\s*(?:to|-|–)\\s*population\\s*ratio&quot;,
+    sep = &quot;|&quot;
+  )
+  str_detect(x, regex(patt, ignore_case = TRUE))
+}
+
+
+step3 &lt;- step2 %&gt;%
+  rowwise() %&gt;%
+  mutate(
+    AgeGroup        = paste(Tokens[map_lgl(Tokens, is_agegroup)], collapse = &quot;; &quot;),
+    EmploymentStatus= paste(Tokens[map_lgl(Tokens, is_employment)], collapse = &quot;; &quot;),
+    MaritalStatus   = paste(Tokens[map_lgl(Tokens, is_marital)], collapse = &quot;; &quot;),
+    Sex             = paste(Tokens[map_lgl(Tokens, is_sex)], collapse = &quot;; &quot;),
+    PopulationBase  = paste(Tokens[map_lgl(Tokens, is_population_base)], collapse = &quot;; &quot;)
+  ) %&gt;%
+  ungroup() %&gt;%
+  mutate(across(c(AgeGroup, EmploymentStatus, MaritalStatus, Sex, PopulationBase),
+                ~na_if(trimws(.), &quot;&quot;)))
+
+long_data &lt;- step1 %&gt;%
+  pivot_longer(-1, names_to = &quot;OriginalName&quot;, values_to = &quot;Value&quot;)
+
+tidy_data &lt;- long_data %&gt;%
+  left_join(step3 %&gt;% select(-Tokens), by = &quot;OriginalName&quot;) %&gt;%
+  select(-OriginalName)</code></pre>
+<p>The dataset originates from the ABS Labour Force Survey (Excel
+format). Each sheet contains multiple employment-related series reported
+monthly, with units expressed in thousands of persons (000). The time
+span covers February 1978 to July 2025, providing 570 monthly
+observations. In the raw file, the 2-10 rows consist of metadata,
+including <code>Unit</code>, <code>Series Type</code>,
+<code>Data Type</code>, <code>Frequency</code>,
+<code>Collection Month</code>, <code>Series Start/End</code>,
+<code>Number of Observations</code>, and <code>Series ID</code>. From
+row 11 on wards, the table records the actual observations: the first
+column denotes the reference month, while subsequent columns correspond
+to distinct labour force series, such as
+<code>Employed Total (Persons)</code>,
+<code>Employed Total (Males)</code>, and
+<code>Employed Part-time (Females)</code>. During preprocessing, the
+metadata rows were excluded.</p>
+<p><code>Person</code> is the sum of <code>Male</code> and
+<code>Female.</code> If contain <code>Person</code>, removed. After
+preprocessing, the dataset contains only male and female
+disaggregations, with “Persons” (the combined total of both sexes)
+excluded to avoid redundancy. The analytical dataset therefore consists
+of monthly observations across multiple age groups, employment statuses,
+and marital statuses, with sex (Males and Females) retained as a
+categorical variable. The outcome variable is Value, representing the
+number of persons (in thousands).</p>
+<pre class="r"><code>observations = dim(tidy_data)[1]
+variables = dim(tidy_data)[2]
+categorical = sum(sapply(tidy_data, is.character)) 
+uniques &lt;- sapply(tidy_data, function(x) n_distinct(x, na.rm = TRUE))
+maxunique &lt;- max(uniques)
+maxuniquename &lt;- names(uniques)[which.max(uniques)]
+overall_missing_pct &lt;- round((sum(is.na(tidy_data))/(nrow(tidy_data)*ncol(tidy_data)))*100,2)</code></pre>
+<div id="data-description" class="section level2">
+<h2>Data Description</h2>
+<p>The dataset contains 861840 observations and 7 variables. This mix of
+quantitative and qualitative features provides the basis for
+classification.</p>
+<p>The categorical variables vary greatly in distinct values. Some are
+binary, while others are high-cardinality with up to 843057 unique
+values (e.g., identifiers such as Value).</p>
+<pre class="r"><code>tidy_data &lt;- tidy_data %&gt;%
+  mutate(
+    Date      = as.Date(as.numeric(...1), origin = &quot;1899-12-30&quot;),
+    YearMonth = as.yearmon(Date)) %&gt;%
+  select(-c(&quot;...1&quot;,&quot;Date&quot;))</code></pre>
+<pre class="r"><code>var_summary &lt;- map_dfr(names(tidy_data), function(col) {
+  tibble(
+    Variable = col,
+    Type = class(tidy_data[[col]])[1],
+    UniqueValues = n_distinct(tidy_data[[col]])
+  )
+})
+var_summary</code></pre>
+<pre><code>## # A tibble: 7 × 3
+##   Variable         Type      UniqueValues
+##   &lt;chr&gt;            &lt;chr&gt;            &lt;int&gt;
+## 1 Value            character       843057
+## 2 AgeGroup         character           18
+## 3 EmploymentStatus character           14
+## 4 MaritalStatus    character            3
+## 5 Sex              character            2
+## 6 PopulationBase   character            2
+## 7 YearMonth        yearmon            570</code></pre>
+</div>
 
 
 

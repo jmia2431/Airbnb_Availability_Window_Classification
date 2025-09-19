@@ -1,0 +1,80 @@
+---
+title: "EDA"
+author: "mia"
+date: "2025-09-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(ggplot2)
+library(tidyverse)
+library(janitor)
+library(naniar)
+df <- read_csv("dataset.csv")
+```
+
+```{r}
+miss_tbl <- tibble(
+  variable = names(df),
+  n_missing = sapply(df, function(x) sum(is.na(x)))
+) %>%
+  mutate(pct_missing = round(100 * n_missing / nrow(df), 2)) %>%
+  arrange(desc(pct_missing))
+
+print(miss_tbl, n = Inf)
+```
+```{r}
+library(ggplot2)
+
+# 就业类型整体分布
+ggplot(df, aes(x = EmploymentType)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribution of Employment Type")
+
+# 性别 × 就业类型
+ggplot(df, aes(x = Sex, fill = EmploymentType)) +
+  geom_bar(position = "fill") +
+  labs(title = "Employment Type by Sex", y = "Proportion")
+
+# 婚姻状态 × 就业类型
+ggplot(df, aes(x = Marital, fill = EmploymentType)) +
+  geom_bar(position = "fill") +
+  labs(title = "Employment Type by Marital Status", y = "Proportion")
+
+# 年龄组 × 就业类型
+ggplot(df, aes(x = AgeGroup_ord, fill = EmploymentType)) +
+  geom_bar(position = "fill") +
+  labs(title = "Employment Type by Age Group", y = "Proportion")
+```
+
+```{r}
+# 按年份的兼职比例
+df_yearly <- df %>%
+  group_by(Year, EmploymentType) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(Year) %>%
+  mutate(prop = n / sum(n))
+
+ggplot(df_yearly, aes(x = Year, y = prop, color = EmploymentType)) +
+  geom_line(size = 1) +
+  labs(title = "Trend of Employment Type over Time", y = "Proportion")
+```
+
+```{r}
+ggplot(df, aes(x = `Civilian population aged 15 years and over`,
+                     fill = EmploymentType)) +
+  geom_histogram(position = "fill", bins = 30) +
+  labs(title = "Civilian Population vs Employment Type", y = "Proportion")
+```
+```{r}
+chisq.test(table(df$Sex, df$EmploymentType))
+chisq.test(table(df$Marital, df$EmploymentType))
+chisq.test(table(df$AgeGroup_ord, df$EmploymentType))
+t.test(Year ~ EmploymentType, data = df)
+t.test(`Civilian population aged 15 years and over` ~ EmploymentType, data = df)
+```
+
+```{r}
+cor(df$Year, df$`Civilian population aged 15 years and over`)
+```

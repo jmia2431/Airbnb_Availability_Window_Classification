@@ -157,16 +157,74 @@ combined <- tidy_data %>%
                                else if (is.logical(.x)) NA
                                else NA_character_)),.groups = "drop")
 
+age_levels <- c("15-19 years","20-24 years","25-29 years","30-34 years","35-39 years",
+                "40-44 years","45-49 years","50-54 years","55-59 years","60-64 years",
+                "65 years and over")
+library(lubridate)
+
+combined <- combined %>%
+  mutate(AgeGroup_ord = factor(AgeGroup,levels = age_levels, ordered = TRUE),
+         Marital = replace_na(Marital, "Unknown"),
+         EmploymentType = ifelse(
+      `employment_Employed full-time` > `employment_Employed part-time`,
+      "Full-time", "Part-time"
+    ) %>% factor(levels = c("Part-time", "Full-time")),
+         YearMonth_date = as.Date(as.yearmon(YearMonth, format = "%m-%Y")),
+         Year = year(YearMonth_date),
+         Month = month(YearMonth_date)) %>%
+  select(-c('AgeGroup','Employment to population ratio', 'population_total')) %>%
+  filter(!is.na(AgeGroup_ord)) %>%
+    select(
+    YearMonth_date, Year, Month,
+    Sex, Marital, AgeGroup_ord,
+    `Civilian population aged 15 years and over`,
+    EmploymentType
+  )
+
+table(combined$EmploymentType)
 ```
 
+```{r, message=FALSE}
+
+```
 
 ```{r}
-var_summary <- map_dfr(names(tidy_data), function(col) {
-  tibble(
-    Variable = col,
-    Type = class(tidy_data[[col]])[1],
-    UniqueValues = n_distinct(tidy_data[[col]])
-  )
-})
-var_summary
+write.csv(combined, "dataset.csv", row.names = FALSE)
+```
+
+To what extent can demographic and temporal characteristics (sex, marital status, age group, civilian population and time) be used to classify whether employed individuals work full-time or part-time?
+
+```{r}
+plot_categorical_distribution <- function(data) {
+  categorical_vars <- data %>%
+    select(where(is.factor) | where(is.character))
+  figure_counter <- 1
+  for (var in names(categorical_vars)) {
+    non_na_data <- data %>%
+      filter(!is.na(.data[[var]]))
+    if (nrow(non_na_data) == 0) next
+    
+    figure_title <- paste("Proportion of Categories in ", var, sep = "")
+    
+    p <- ggplot(non_na_data, aes(x = .data[[var]])) +       
+      geom_bar(aes(y = (..count..) / sum(..count..), fill = .data[[var]]), color = "black") +       
+      labs(title = figure_title, x = "Category", y = "Proportion") +       
+      theme_minimal() +       
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    print(p)
+    figure_counter <- figure_counter + 1
+    }
+}
+
+plot_categorical_distribution(combined)
+```
+
+```{r}
+# for modelling part
+# the distribution of the sample is un balance
+library(tidymodels)
+library(themis)
+rec_down <- recipe(EmploymentType ~ ., data = combined) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_downsample(EmploymentType) 
 ```

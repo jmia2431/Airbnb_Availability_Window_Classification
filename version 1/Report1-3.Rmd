@@ -144,21 +144,6 @@ cleaned_data <- cleaned_data %>%
   # Join cluster back to listings by neighborhood ID
   left_join(neigh_coords %>% select(neighbourhood_cleansed, cluster), 
             by = "neighbourhood_cleansed") %>%
-  # Rule-based commercial score
-  mutate(commercial_score = (availability_365 >= 300) + (minimum_nights <= 10) + (host_total_listings_count >= 5) + (instant_bookable == "1") + (room_type == "Entire home/apt"),
-         commercial_score = case_when(
-      commercial_score %in% c(0, 1) ~ 1,
-      commercial_score == 2         ~ 2,
-      commercial_score == 3         ~ 3,
-      commercial_score %in% c(4, 5) ~ 4),
-         # Missingness flag for host_acceptance_rate    
-         host_acceptance_rate_missing = ifelse(is.na(host_acceptance_rate), 1, 0),
-         # Impute acceptance rate with -1 (sentinel)
-         host_acceptance_rate = ifelse(is.na(host_acceptance_rate), -1, host_acceptance_rate),
-         # Missingness flags for beds/bedrooms/bathrooms
-         beds_missing = ifelse(is.na(beds), 1, 0),
-         bedrooms_missing = ifelse(is.na(bedrooms), 1, 0),
-         bathrooms_missing = ifelse(is.na(bathrooms), 1, 0)) %>%
   
 # step 4 Column removal for data simplification
   select(-any_of(DROP)) # Drop all columns listed in DROP
@@ -228,18 +213,5 @@ p2 <- ggplot(neigh_coords, aes(x=avg_lon, y=avg_lat, color=cluster)) +
     legend.title = element_text(size = 7),
     legend.text  = element_text(size = 6)
   )
-
-p3 <- ggplot(cleaned_data, aes(commercial_score)) +
-  geom_bar() +
-  labs(title = "C. Distribution of commercial_score", 
-       x = "Score", y = "Count") +
-  theme_bw(base_size = 9) +
-  theme(
-    plot.title = element_text(size = 8),
-    axis.title = element_text(size = 7),
-    axis.text  = element_text(size = 6),
-    legend.title = element_text(size = 7),
-    legend.text  = element_text(size = 6)
-  )
-grid.arrange(p1, p2, p3, nrow = 2)
+grid.arrange(p1, p2, nrow = 2)
 ```

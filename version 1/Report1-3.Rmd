@@ -77,7 +77,7 @@ set.seed(5003)
 #Step0 Drop the irrelevant columns
 
 #Drop the columns which are irrelevant for prediction, sensitive, redundant, or unusable.
-DROP <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review", "neighbourhood_cleansed","latitude", "longitude", "bathrooms_text", "host_location","host_since", "first_review", "last_scraped","license","has_availability", "availability_365", "minimum_nights", "host_total_listings_count", "instant_bookable", "room_type")
+DROP <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review", "neighbourhood_cleansed","latitude", "longitude", "bathrooms_text", "host_location","host_since", "first_review", "last_scraped","license","has_availability", "availability_365", "minimum_nights", "host_total_listings_count", "instant_bookable")
 
 cleaned_data <- orig_data %>%
   
@@ -146,9 +146,11 @@ cleaned_data <- cleaned_data %>%
             by = "neighbourhood_cleansed") %>%
   # Rule-based commercial score
   mutate(commercial_score = (availability_365 >= 300) + (minimum_nights <= 10) + (host_total_listings_count >= 5) + (instant_bookable == "1") + (room_type == "Entire home/apt"),
-         
-         # Label: score >= 3 => commercial; else occasional
-         rental_type = ifelse(commercial_score >= 3, "commercial", "occasional"),
+         commercial_score = case_when(
+      commercial_score %in% c(0, 1) ~ 1,
+      commercial_score == 2         ~ 2,
+      commercial_score == 3         ~ 3,
+      commercial_score %in% c(4, 5) ~ 4),
          # Missingness flag for host_acceptance_rate    
          host_acceptance_rate_missing = ifelse(is.na(host_acceptance_rate), 1, 0),
          # Impute acceptance rate with -1 (sentinel)
@@ -176,14 +178,13 @@ In step 2, several filter conditions are applied to enforce data quality and log
 ### Step3 Spatial clustering, outcome construction, and missingness handling
 
 In this step, listings with complete geographic information are retained, and neighborhood centroids are calculated before being clustered using k-means (`k=3`, `nstart=25`). The resulting spatial cluster labels are merged back into the dataset and are illustrated in Appendix 1.B, which shows the distribution of neighbourhood centroids across three spatial clusters. 
-To operationalise the study’s research question, a rule-based outcome variable `commercial_score` is defined from five Boolean rules (`availability_365 ≥ 300`, `minimum_nights ≤ 10`, `host_total_listings_count ≥ 5`, `instant_bookable == "1"`, and `room_type == "Entire home/apt"`), serving as proxies for intensive, business-like hosting behaviour. The score distribution is illustrated in Appendix 1.C, showing that most listings satisfy two to three of the criteria, with fewer listings meeting none or all five. From this score, the binary variable `rental_type` is derived, classifying hosts as “commercial” or “occasional.” The class balance is reported in Appendix 1.D, where commercial rentals account for 58% of the sample, compared to 42% for occasional rentals.
-To address data quality, missingness indicators are created for variables such as `host_acceptance_rate`, `beds`, `bedrooms`, and `bathrooms`, with missing acceptance rates replaced by -1. These procedures enhance the dataset by embedding spatial structure, generating a research-relevant binary outcome, and explicitly handling missing data, thereby improving interpretability and preparing the data for robust modeling.
+To operationalise the study’s research question, a rule-based outcome variable `commercial_score` is defined from five Boolean rules (`availability_365 ≥ 300`, `minimum_nights ≤ 10`, `host_total_listings_count ≥ 5`, `instant_bookable == "1"`, and `room_type == "Entire home/apt"`), serving as proxies for intensive, business-like hosting behaviour. The score distribution is illustrated in Appendix 1.C, showing that most listings satisfy two to three of the criteria, with fewer listings meeting none or all five. To address data quality, missingness indicators are created for variables such as `host_acceptance_rate`, `beds`, `bedrooms`, and `bathrooms`, with missing acceptance rates replaced by -1. These procedures enhance the dataset by embedding spatial structure, generating a research-relevant binary outcome, and explicitly handling missing data, thereby improving interpretability and preparing the data for robust modeling.
 
 ### Step4 Column removal for data simplification
 
 This step uses`select(-any_of(DROP)` to remove all columns listed in the previously defined DROP vector, such as IDs, text descriptions, URLs, geographic coordinates, redundant review scores, and host personal details. It simplifies the dataset by keeping only variables relevant to constructing the outcome variable and predictive features, discarding irrelevant, redundant, or sensitive information.
 
-Leakage control: The variables used to define the proxy outcome (`availability_365`, `minimum_nights`, `host_total_listings_count`, `instant_bookable`, `room_type`) are not included as predictors. This separation reduces label leakage risk and helps explainability.
+Leakage control: The variables used to define the proxy outcome (`availability_365`, `minimum_nights`, `host_total_listings_count`, `instant_bookable`) are not included as predictors. This separation reduces label leakage risk and helps explainability.
 
 
 # Reference & Appendix
@@ -240,23 +241,5 @@ p3 <- ggplot(cleaned_data, aes(commercial_score)) +
     legend.title = element_text(size = 7),
     legend.text  = element_text(size = 6)
   )
-
-p4 <- cleaned_data %>% 
-  count(rental_type) %>%
-  mutate(pct = percent(n / sum(n))) %>%
-  ggplot(aes(x = rental_type, y = n, label = pct)) +
-  geom_col(width = 0.4) +   
-  geom_text(vjust = -0.3, size = 2) +
-  labs(title = "D. Class Balance of rental_type", 
-       x = NULL, y = "Count") +
-  theme_bw(base_size = 9) +
-  theme(
-    plot.title = element_text(size = 8),
-    axis.title = element_text(size = 7),
-    axis.text  = element_text(size = 6),
-    legend.title = element_text(size = 7),
-    legend.text  = element_text(size = 6)
-  )
-
-grid.arrange(p1, p2, p3, p4, nrow = 2)
+grid.arrange(p1, p2, p3, nrow = 2)
 ```

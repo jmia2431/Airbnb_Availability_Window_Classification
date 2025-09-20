@@ -21,6 +21,8 @@ library(kableExtra)
 library(lubridate)
 library(factoextra)
 library(stringr)
+library(scales)
+library(gridExtra)
 orig_data = read.csv("datasets/listings.csv")
 ```
 
@@ -61,31 +63,13 @@ The categorical variables vary greatly in distinct values. Some are binary, whil
 
 ## Outcome Variable
 
-Dependent variable: binary categorical variable indicating rental type. This variable contain two outcome which is commercial where there’s always available, entire unit, multiple listings by host and occasional where there’s limited availability, host-occupied, fewer listings. Yet this metric it not in the raw data, we will construct it using `availability_365`, `minimum_nights`, `host_total_listings_count` and `instant_bookable`.
+The dataset does not provide a pre-defined dependent variable. To address this, we constructed a binary categorical outcome, rental type, distinguishing between commercial and occasional listings. Commercial listings are characterised by continuous availability, entire-unit rentals, and multiple properties managed by the same host, whereas occasional listings typically exhibit limited availability, are host-occupied, and involve fewer properties. This proxy outcome was operationalised using a rule-based approach based on `availability_365`, `minimum_nights`, `host_total_listings_count`, and `instant_bookable`. While pragmatic, this construction inevitably introduces risks: the thresholds may not fully align with regulatory definitions, and overlap between features used in outcome construction and potential predictors may lead to label noise and data leakage if not carefully controlled.
 
 ## Data Challenges
 
-Large number of variables results in high dimensionality, complicate both exploration and modelling. In particular, the presence of high-cardinality categorical variable(e.g., `listing_url`and`amenities`) risked inflating dimensionality without contributing meaningful predictive values. The coexistence of heterogeneous data types necessitates careful preprocessing to ensure model compatibility and reliable downstream analysis. The dataset shows a moderate overall missing rate of `r overall_missing_pct`, but this is unevenly distributed across features. A small subset of variables accounts for the majority of gaps, with some exhibiting substantial missingness(Appendix 1).
+The dataset contains a large number of variables, resulting in high dimensionality that complicates both exploration and modelling. In particular, the presence of high-cardinality categorical variables (e.g., `listing_url` and `amenities`) risks inflating dimensionality without contributing meaningful predictive value. The coexistence of heterogeneous data types further necessitates careful preprocessing to ensure model compatibility and reliable downstream analysis. Moreover, the dataset exhibits a moderate overall missing rate of `r overall_missing_pct`, which is unevenly distributed across features. A small subset of variables accounts for the majority of missingness, with some features displaying substantial gaps (Appendix 1.A).
 
 # Clean and Prepare the Data
-
-### Step0 Drop the irrelevant columns
-
-Drop the columns which are irrelevant for prediction, sensitive, redundant, or unusable. These include: Unique identifiers (`id`, `scrape_id`);Textual or descriptive fields (`name`, `description`, `host_about`);URLs/images (`listing_url`, `picture_url`)Geographic coordinates (`latitude`, `longitude`);Host personal info (`host_name`, `host_url`, `host_location`)Redundant or overlapping variables (`review_scores_xxx`, `property_type` overlaps with `room_type`);Invalid or unusable fields (`calendar_updated`, `bathrooms_text`, `license`).
-
-### Step1 Clean and engineer multiple features
-
-Step 1 begins with bathroom cleaning: extract numeric counts (mapping “half” to 0.5) from `bathrooms_text` to fill bathrooms. Then date parsing and durations: convert `host_since`, `first_review`, `last_scraped` into dates, compute `host_tenure` and `listing_age` to capture tenure signals. Next, binarization/numeric coercion: convert `neighborhood_overview` to 0/1, strip `%` from `host_acceptance_rate` and `$` from `price`, convert to numeric, and recode `instant_bookable` to 0/1. Finally, category consolidation: collapse `room_type` into `"Entire home/apt"` vs `"Non-entire place"`. Result: produces a streamlined set of engineered features with fewer missings, consistent types, and reduced categories, ready for step2 and outcome construction.
-### step2 sanity check and filtering stage
-In step2, the code applies several `filter` conditions for quality control. Using `across()`, it ensures all numeric variables (except `longitude` and `latitude`) are non-negative, removing illogical rows. It then requires `price` > 0 and non-empty, and enforces `host_tenure` >= `listing_age` for temporal consistency. Only listings with `host_location` containing “Australia” and with non-empty `license` and `has_availability` are kept, maintaining regional focus and completeness. Finally, `minimum_nights` is restricted to ≤365, since values ≥365 imply long-term leasing. Excluding these 26 outliers has little effect but improves feature comparability. The result is a consistent, complete dataset aligned with the study’s regional scope.
-
-### step3 Spatial clustering, outcome construction, and missingness handling
-
-In this step, a `filter` retains listings with non-missing `longitude`, `latitude`, and `neighbourhood_cleansed`, ensuring complete geographic data. Neighborhood centroids (`avg_lon`, `avg_lat`) are then computed and clustered using `kmeans` (k=3, nstart=25), producing spatial clusters `cluster` which are merged back via `left_join.` Within `mutate`, a commercial score `commercial_score` is built from five Boolean rules—`availability_365 >= 300`,` minimum_nights <= 10`, `host_total_listings_count >= 5`, `instant_bookable == "t"`, and `room_type == "Entire home/apt`—and used to derive the binary outcome `rental_type` (“commercial” vs. “occasional”). Additional missingness indicators (`host_acceptance_rate_missing`, `beds_missing`, `bedrooms_missing`, `bathrooms_missing`) are created, with missing `host_acceptance_rate` replaced by -1. Overall, this step combines spatial clustering, rule-based outcome construction, and missing-data handling, enriching each listing with cluster labels, a derived rental-type, and explicit missingness features for subsequent modeling.
-
-### step4 Column removal for data simplification
-
-This step uses`select(-any_of(DROP)` to remove all columns listed in the previously defined DROP vector, such as IDs, text descriptions, URLs, geographic coordinates, redundant review scores, and host personal details. The purpose is to simplify the dataset by keeping only variables relevant to constructing the outcome variable and predictive features, while discarding irrelevant, redundant, or sensitive information.
 
 ```{r Clean and Prepare the Data, warning=FALSE}
 set.seed(5003)
@@ -93,7 +77,7 @@ set.seed(5003)
 #Step0 Drop the irrelevant columns
 
 #Drop the columns which are irrelevant for prediction, sensitive, redundant, or unusable.
-DROP <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review", "neighbourhood_cleansed","latitude", "longitude", "bathrooms_text", "host_location","host_since", "first_review", "last_scraped","license","has_availability")
+DROP <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review", "neighbourhood_cleansed","latitude", "longitude", "bathrooms_text", "host_location","host_since", "first_review", "last_scraped","license","has_availability", "availability_365", "minimum_nights", "host_total_listings_count", "instant_bookable", "room_type")
 
 cleaned_data <- orig_data %>%
   
@@ -161,11 +145,10 @@ cleaned_data <- cleaned_data %>%
   left_join(neigh_coords %>% select(neighbourhood_cleansed, cluster), 
             by = "neighbourhood_cleansed") %>%
   # Rule-based commercial score
-  mutate(commercial_score = (availability_365 >= 300) + (minimum_nights <= 10) + (host_total_listings_count >= 5) + (instant_bookable == "t") + (room_type == "Entire home/apt"),
+  mutate(commercial_score = (availability_365 >= 300) + (minimum_nights <= 10) + (host_total_listings_count >= 5) + (instant_bookable == "1") + (room_type == "Entire home/apt"),
          
          # Label: score >= 3 => commercial; else occasional
          rental_type = ifelse(commercial_score >= 3, "commercial", "occasional"),
-         ,
          # Missingness flag for host_acceptance_rate    
          host_acceptance_rate_missing = ifelse(is.na(host_acceptance_rate), 1, 0),
          # Impute acceptance rate with -1 (sentinel)
@@ -175,21 +158,40 @@ cleaned_data <- cleaned_data %>%
          bedrooms_missing = ifelse(is.na(bedrooms), 1, 0),
          bathrooms_missing = ifelse(is.na(bathrooms), 1, 0)) %>%
   
-  
-  
 # step 4 Column removal for data simplification
   select(-any_of(DROP)) # Drop all columns listed in DROP
 ```
 
+### Step0 Drop the irrelevant columns
+
+In the initial preprocessing stage, variables that are irrelevant for prediction, sensitive in nature, redundant, or otherwise unusable were removed to simplify the dataset and avoid potential bias. Specifically, this included unique identifiers such as `id` and `scrape_id`, descriptive or free-text fields such as `name`, `description`, and `host_about`, and `URL` or `image links` like `listing_url` and `picture_url.` Geographic coordinates (`latitude`, `longitude`) and host personal information (`host_name`, `host_url`, `host_location`) were also excluded, as these either do not contribute to the predictive task or raise privacy concerns. In addition, redundant or overlapping variables were removed, such as the family of `review_scores_xxx` features and `property_type` which overlaps with `room_type.` While this description outlines the main categories of excluded variables, the accompanying code retains the complete list of dropped columns—including additional variables identified in subsequent cleaning stages—to ensure transparency and full reproducibility of the pipeline.
+
+### Step1 Clean and engineer multiple features
+
+Step 1 begins with bathroom cleaning, where numeric counts are extracted from `bathrooms_text` (with “half” mapped to 0.5) to populate the bathrooms field. This step ensures that bathroom information is represented consistently as numeric values, which facilitates later aggregation and modeling. Date variables are then standardised: `host_since`, `first_review`, and `last_scraped` are converted into date formats, from which `host_tenure` and `listing_age` are derived to capture temporal signals about host experience and listing longevity. Next, several variables are binarised or coerced into numeric form, including converting `neighbourhood_overview` to a 0/1 indicator, stripping % from `host_acceptance_rate` and `$` from `price` before converting to numeric, and recoding `instant_bookable` to 0/1. These transformations eliminate formatting inconsistencies and ensure compatibility with quantitative analyses. Finally, categorical consolidation is applied to `room_type`, collapsing levels into "Entire home/apt" versus "Non-entire place", thereby reducing category sparsity and aligning the feature with the project’s research focus on commercial hosting behaviour. These operations streamline the dataset by reducing missingness, imposing consistent data types, and simplifying categories, thereby preparing a clean and interpretable feature set for Step 2 and the construction of the outcome variable.
+
+### Step2 Sanity check and filtering stage
+In step 2, several filter conditions are applied to enforce data quality and logical consistency. First, all numeric variables (excluding `longitude` and `latitude`) are required to be non-negative, thereby eliminating rows with illogical values and ensuring interpretability of numerical features. The `price` variable is restricted to strictly positive values, avoiding invalid zero or missing entries that could distort cost-related analyses. Temporal consistency is enforced by requiring `host_tenure` to be greater than or equal to `listing_age`, preventing cases where a host appears to have joined after the listing was created. To maintain regional scope and regulatory relevance, only listings with `host_location` containing “Australia” and with non-empty `license` and `has_availability` fields are retained. In addition, `minimum_nights` is capped at 365, since larger values indicate year-long leases inconsistent with short-term rental markets. In total, 26 listings are excluded under these conditions but their removal ensures a more coherent dataset. These filters improve feature comparability, uphold logical validity, and align the dataset with the study’s regional and policy context.
+
+### Step3 Spatial clustering, outcome construction, and missingness handling
+
+In this step, listings with complete geographic information are retained, and neighborhood centroids are calculated before being clustered using k-means (`k=3`, `nstart=25`). The resulting spatial cluster labels are merged back into the dataset and are illustrated in Appendix 1.B, which shows the distribution of neighbourhood centroids across three spatial clusters. 
+To operationalise the study’s research question, a rule-based outcome variable `commercial_score` is defined from five Boolean rules (`availability_365 ≥ 300`, `minimum_nights ≤ 10`, `host_total_listings_count ≥ 5`, `instant_bookable == "1"`, and `room_type == "Entire home/apt"`), serving as proxies for intensive, business-like hosting behaviour. The score distribution is illustrated in Appendix 1.C, showing that most listings satisfy two to three of the criteria, with fewer listings meeting none or all five. From this score, the binary variable `rental_type` is derived, classifying hosts as “commercial” or “occasional.” The class balance is reported in Appendix 1.D, where commercial rentals account for 58% of the sample, compared to 42% for occasional rentals.
+To address data quality, missingness indicators are created for variables such as `host_acceptance_rate`, `beds`, `bedrooms`, and `bathrooms`, with missing acceptance rates replaced by -1. These procedures enhance the dataset by embedding spatial structure, generating a research-relevant binary outcome, and explicitly handling missing data, thereby improving interpretability and preparing the data for robust modeling.
+
+### Step4 Column removal for data simplification
+
+This step uses`select(-any_of(DROP)` to remove all columns listed in the previously defined DROP vector, such as IDs, text descriptions, URLs, geographic coordinates, redundant review scores, and host personal details. It simplifies the dataset by keeping only variables relevant to constructing the outcome variable and predictive features, discarding irrelevant, redundant, or sensitive information.
+
+Leakage control: The variables used to define the proxy outcome (`availability_365`, `minimum_nights`, `host_total_listings_count`, `instant_bookable`, `room_type`) are not included as predictors. This separation reduces label leakage risk and helps explainability.
 
 
 # Reference & Appendix
 
 Inside Airbnb. (2025). *Inside Airbnb - Data source.* Retrieved from <http://insideairbnb.com>
 
-Appendix 1: Variables with Any Missingness
-
-```{r Appendix 2, message= FALSE, fig.width=4, fig.height=3}
+Appendix 1. Summary of Data Cleaning and Derived Variables
+```{r Appendix 1, message= FALSE, fig.width=10, fig.height=5}
 miss_df <- tibble(
   var = names(orig_data),
   miss_n = sapply(orig_data, function(x) sum(is.na(x))),
@@ -199,13 +201,62 @@ miss_df <- tibble(
 
 vars_has_miss <- miss_df %>% filter(miss_n > 0) %>% pull(var)
 
-p_has <- orig_data %>%
+p1 <- orig_data %>%
   select(all_of(vars_has_miss)) %>%
   gg_miss_var(show_pct = TRUE) +
   coord_flip() +
-  labs(title = "Variables with Any Missingness") +
+  labs(title = "A. Variables with Any Missingness") +
   scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
-  theme_minimal(base_size = 9) +
-  theme(axis.text.y = element_text(size = 7))
-p_has
+  theme_bw(base_size = 9) +
+  theme(
+    plot.title = element_text(size = 8),
+    axis.title = element_text(size = 7),
+    axis.text  = element_text(size = 6),
+    legend.title = element_text(size = 7),
+    legend.text  = element_text(size = 6)
+  )
+
+p2 <- ggplot(neigh_coords, aes(x=avg_lon, y=avg_lat, color=cluster)) +
+  geom_point(size=2) +
+  labs(title="B. Neighbourhood Centroids by Cluster", x="lon", y="lat") +
+  theme_bw(base_size = 9) +
+  theme(
+    plot.title = element_text(size = 8),
+    axis.title = element_text(size = 7),
+    axis.text  = element_text(size = 6),
+    legend.title = element_text(size = 7),
+    legend.text  = element_text(size = 6)
+  )
+
+p3 <- ggplot(cleaned_data, aes(commercial_score)) +
+  geom_bar() +
+  labs(title = "C. Distribution of commercial_score", 
+       x = "Score", y = "Count") +
+  theme_bw(base_size = 9) +
+  theme(
+    plot.title = element_text(size = 8),
+    axis.title = element_text(size = 7),
+    axis.text  = element_text(size = 6),
+    legend.title = element_text(size = 7),
+    legend.text  = element_text(size = 6)
+  )
+
+p4 <- cleaned_data %>% 
+  count(rental_type) %>%
+  mutate(pct = percent(n / sum(n))) %>%
+  ggplot(aes(x = rental_type, y = n, label = pct)) +
+  geom_col(width = 0.4) +   
+  geom_text(vjust = -0.3, size = 2) +
+  labs(title = "D. Class Balance of rental_type", 
+       x = NULL, y = "Count") +
+  theme_bw(base_size = 9) +
+  theme(
+    plot.title = element_text(size = 8),
+    axis.title = element_text(size = 7),
+    axis.text  = element_text(size = 6),
+    legend.title = element_text(size = 7),
+    legend.text  = element_text(size = 6)
+  )
+
+grid.arrange(p1, p2, p3, p4, nrow = 2)
 ```

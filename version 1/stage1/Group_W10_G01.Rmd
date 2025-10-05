@@ -1,0 +1,416 @@
+---
+title: "Project Plan and EDA"
+author: |
+  520325185, 530419471, 490557374, 540170177, 540350850
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+  pdf_document:
+    number_sections: true
+geometry: margin=1in
+fontsize: 11pt
+linestretch: 1.2
+---
+
+<style>
+h1.title { text-align: center; }
+.author, .date { text-align: center; }
+table caption { caption-side: top; text-align: center; font-weight: 600; }
+.figure > p.caption, p.caption { text-align: center; font-style: italic; }
+pre, code { white-space: pre-wrap; }
+img { display: block; margin: 0 auto; }
+</style>
+
+```{r format_preamble, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 7, fig.height = 4, dpi = 120
+)
+```
+
+<style>
+h1.title { text-align: center; }
+h1, h2 { text-align: center; }
+.author { text-align: center; }
+</style>
+
+
+```{r setup, message=FALSE, warning=FALSE}
+library(dplyr)
+library(knitr)
+library(purrr)
+library(naniar)
+library(ggplot2)
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(caret)
+library(kableExtra)
+library(lubridate)
+library(factoextra)
+library(stringr)
+library(scales)
+library(gridExtra)
+library(reshape2)
+library(tidyr)
+library(patchwork)
+
+knitr::opts_chunk$set(
+  fig.align = "center",
+  out.extra = 'style="display:block; margin:0 auto; max-width:90%;"'
+)
+
+orig_data = read.csv("./listings.csv")
+```
+
+## **Define the Problem**
+
+#### **The research question for this project is:**
+
+To what extent can Airbnb listing characteristics be utilized to determine, within a three-monthforward-looking window, the month that exhibits the maximum number of available days?
+
+#### **Problem as a Classification Task:**
+
+This study treats the task as supervised multi-class classification, with the outcome identifying which of the next three months has the most available days (First-month, Second-month, Third-month, or Indeterminate outcome). Predictors include general listing attributes, room characteristics, and host factors, supporting systematic forecasts of short-term availability.
+
+#### **Relevance to Sydney and Australia:**
+
+In Sydney’s strongly seasonal short-term rental market, early post-publication availability shapes both tourism capacity and housing pressure. Predicting at posting which of the first three months will have the highest available days clarifies supply dynamics and host behavior. These insights support evidence-based policy in New South Wales and Australia on balancing tourism with housing affordability.
+
+## **Describe the Data**
+
+```{r Describe the Data, message=FALSE, warning=FALSE}
+observations = dim(orig_data)[1]
+variables = dim(orig_data)[2]
+numeric = sum(sapply(orig_data, is.numeric)) 
+integer = sum(sapply(orig_data, is.integer)) 
+double = sum(sapply(orig_data, is.double)) 
+categorical = sum(sapply(orig_data, is.character)) 
+logical = sum(sapply(orig_data, is.logical))
+cate_total = categorical + logical
+uniques <- sapply(orig_data, function(x) n_distinct(x, na.rm = TRUE))
+maxunique <- max(uniques)
+maxuniquename <- names(uniques)[which.max(uniques)]
+overall_missing_pct <- round((sum(is.na(orig_data))/(nrow(orig_data)*ncol(orig_data)))*100,2)
+miss_by_var <- data.frame(
+  variable = names(orig_data),
+  n_missing = colSums(is.na(orig_data))) %>%
+  mutate(
+    pct_missing = round(100 * n_missing / nrow(orig_data), 2)) %>%
+  arrange(desc(pct_missing))
+total_missing_cells <- sum(miss_by_var$n_missing)
+miss_conc <- miss_by_var %>%
+  mutate(prop = n_missing / total_missing_cells, cum_prop = cumsum(prop))
+k_vals <- c(3, 5, 10)
+topk_cover <- lapply(k_vals, function(k){
+  tibble(
+    k = k,
+    topk_cum_pct_of_all_missing = round(100 * miss_conc$cum_prop[k], 2),
+    topk_vars = paste(miss_conc$variable[seq_len(min(k, nrow(miss_conc)))], collapse = ", "))}) %>% bind_rows()
+thresh <- c('>50' = 50, '>20' = 20, '>10' = 10, '>5' = 5, '>1' = 1)
+thresh_tbl <- tibble(
+  threshold_pct = names(thresh),
+  n_vars = sapply(unname(thresh), function(t) sum(miss_by_var$pct_missing > t)))
+n_zero_missing <- sum(miss_by_var$n_missing == 0)
+```
+
+#### **Data Source**
+
+The dataset for comes from Inside Airbnb(Inside Airbnb, 2025), an independent project that collects and publishes Airbnb data on housing impacts. The data are obtained through web scraping and are publicly accessible. For this study, we use the detailed listings data for Sydney, New South Wales, dated 10 June 2025.
+
+#### **Data Description**
+
+The Sydney Airbnb dataset contains `r observations` observations and `r variables` variables, making it a tall dataset with more listings than attributes. Of these, `r numeric` variables are numeric (`r integer` integer and `r double` double), and `r cate_total` are categorical, including `r logical` logical variables. This mix of quantitative and qualitative features provides a solid basis for classification. Categorical variables differ greatly in cardinality. Some are binary, while others have many unique levels, with up to `r maxunique` categories (e.g., `r maxuniquename`). None of the variables show zero variance, ensuring that each contributes some differentiation across listings. The dataset has an overall missing rate of `r overall_missing_pct`%. Only `r n_zero_missing` variables are fully complete, while the rest contain varying degrees of missingness. The top `r topk_cover$k[1]` most incomplete variables account for `r topk_cover$topk_cum_pct_of_all_missing[1]`% of all missing values, and the top `r topk_cover$k[2]` together cover `r topk_cover$topk_cum_pct_of_all_missing[2]`%. In severity, `r thresh_tbl$n_vars[thresh_tbl$threshold_pct=='>20']` variables have more than 20% missingness, and `r thresh_tbl$n_vars[thresh_tbl$threshold_pct=='>10']` exceed 10%. Overall, the dataset is large in scale (over 10,000 observations), messy due to missingness, and supports a multi-class classification problem—making it both challenging and rich for analysis.  
+
+#### **Outcome Variable**
+
+The outcome variable is defined as a categorical measure indicating which of the next three months records the highest number of available days for a given Airbnb listing. It consists of four mutually exclusive categories: First-month, Second-month, and Third-month, representing cases where the maximum availability occurs in the first, second, or third month respectively, and Indeterminate outcome, which captures cases where no single month clearly dominates in availability. This multi-class outcome enables systematic modeling of short-term temporal variation in listing availability.
+
+#### **Data Challenges**
+
+The dataset contains a large number of variables, resulting in high dimensionality that complicates both exploration and modelling. In particular, the presence of high-cardinality categorical variables (e.g., `listing_url` and `amenities`) risks inflating dimensionality without contributing meaningful predictive value. The coexistence of heterogeneous data types further necessitates careful preprocessing to ensure model compatibility and reliable downstream analysis.
+
+## **Clean and Prepare the Data**
+
+```{r Clean and Prepare the Data, warning=FALSE}
+set.seed(5003)
+
+#Step0 Drop the irrelevant columns
+
+#Drop the columns which are irrelevant for prediction, sensitive, redundant, or unusable.
+DROP <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "host_id","id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "accommodates",  "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review", "host_tenure", "listing_age" , "bathrooms_text", "host_location","host_since", "first_review","number_of_reviews_ltm" ,"number_of_reviews_l30d", "last_scraped","license","has_availability", "availability_365", "minimum_nights", "host_total_listings_count", "instant_bookable", "month1","month2","month3","availability_30","availability_60","availability_90")
+
+step1 <- orig_data %>%
+  
+# step1 Clean and engineer multiple features
+  
+  # Fill bathrooms from bathrooms_text if missing; "half"=0.5 else extract number
+  mutate(bathrooms = coalesce(bathrooms,case_when(str_detect(bathrooms_text, regex("half", ignore_case = TRUE)) ~ 0.5,TRUE ~ as.numeric(str_extract(bathrooms_text, "\\d+(?:\\.\\d+)?")))),
+         
+    # Parse dates to Date objects
+    host_since = ymd(host_since),
+    first_review = ymd(first_review),
+    last_scraped = ymd(last_scraped),
+  
+    # Calculate host tenure and listing age in days
+    host_tenure = as.numeric(last_scraped - host_since, units = "days"),
+    listing_age = as.numeric(last_scraped - first_review, units = "days"),
+    
+    # Neighborhood overview: 1 if non-empty, else 0
+    neighborhood_overview = ifelse(!is.na(neighborhood_overview) & neighborhood_overview != "", 1, 0),
+    host_acceptance_rate = as.numeric(str_remove(host_acceptance_rate, "%")),
+    
+    # Remove "%", "$" and convert to numeric
+    price = as.numeric(str_remove(price, "[$]")))
+  
+  
+# step 2 sanity check and filtering stage
+step2 <- step1 %>%
+  filter(across(.cols = where(is.numeric) & !c("longitude", "latitude"), .fns  = ~ is.na(.x) | .x >= 0),# Keep only non-negative numeric values (except lat/long)
+    price > 0,                               # Require positive price
+    host_tenure >= listing_age,              # Ensure host tenure >= listing age       
+    str_detect(host_location, "Australia"),  # Host must be located in Australia
+    license != "",                           # License field must not be empty
+    price != "",                             # Price field must not be blank
+    has_availability != "",                  # Availability field must not be blank
+    bathrooms != 0)                   
+
+# step 3
+cleaned_data <- step2 %>%
+  # Create monthly availability windows
+  mutate(
+    month1 = availability_30,                        # Availability in the first 30 days
+    month2 = availability_60 - availability_30,      # Availability in days 31–60
+    month3 = availability_90 - availability_60) %>%       # Availability in days 61–90
+  rowwise() %>%
+  # Define outcome category based on the month with maximum availability
+  mutate(
+    outcome = {
+      vals <- c(month1, month2, month3)              # Collect availability values
+      max_val <- max(vals, na.rm = TRUE)             # Find maximum availability
+      if (sum(vals == max_val, na.rm = TRUE) > 1) {  # If tie across months
+        "Indeterminate"                              # → Assign as Indeterminate
+      } else {
+        which_max <- which.max(vals)                 # Otherwise, get index of max
+        c("First-month", "Second-month", "Third-month")[which_max]}}) %>%  # Map to category
+  ungroup() %>%  # Return to ungrouped data frame
+
+# step 4  
+  select(-any_of(DROP)) # Drop all columns listed in DROP
+```
+
+#### **Cleaning process**
+
+##### **Step 0: Drop the irrelevant columns**
+
+In the initial preprocessing stage, variables irrelevant for prediction, sensitive, or redundant were removed to streamline the dataset and reduce bias. These include unique identifiers (`id`, `scrape_id`), free-text fields (`name`, `description`, `host_about`), URLs and images (`listing_url`, `picture_url`), geographic coordinates (`latitude`, `longitude`), and host personal details (`host_name`, `host_url`, `host_location`). Redundant features such as the `review_scores_xxx` family and `property_type` (overlapping with `room_type`) were also discarded. While this summary outlines the main categories, the full list of dropped variables is preserved in the code for transparency and reproducibility.
+
+##### **Step 1: Initial Cleaning and Feature Engineering**
+
+Bathroom counts are standardised using `bathrooms_text`, mapping “half” to 0.5 and extracting numeric values where available. Date variables (`host_since`, `first_review`, `last_scraped`) are converted into proper formats to derive `host_tenure` and `listing_age` as measures of host experience and listing longevity. Other fields are cleaned for consistency: `neighbourhood_overview` is recoded as a binary indicator (1 if non-empty, 0 otherwise), `host_acceptance_rate` is converted from percentages to numeric, and `price` is stripped of the dollar sign before numeric conversion. These steps ensure consistent data types, introduce temporal features, and create interpretable numeric variables for subsequent analysis.
+
+##### **Step 2: Sanity check and filtering stage**
+
+Several filters were applied to ensure logical and regulatory consistency. Numeric variables (except `longitude` and `latitude`) were restricted to non-negative values, with `price` required to be strictly positive. Temporal validity was enforced by requiring `host_tenure ≥ listing_age`. Listings were retained only if `host_location` contained “Australia” and both `license` and `has_availability` were non-empty(Airbnb. (n.d.)). The bathrooms values below zero were removed in line with New South Wales regulations (2010). In total, `r dim(orig_data)[1]-dim(step2)[1]` listings were excluded, improving data coherence and policy alignment.
+
+##### **Step 3: Outcome construction, and missingness handling**
+
+Forward availability is recasted into three non-overlapping windows (0–30, 31–60, 61–90 days). For each listing, the window with the most available days defines the outcome; ties are labelled Indeterminate. This yields a four-class target (First-month, Second-month, Third-month, Indeterminate) that directly operationalises the timing of peak availability.
+
+##### **Step 4: Column removal for data simplification**
+
+Irrelevant and sensitive fields such as IDs, text descriptions, URLs, geographic coordinates, redundant review scores, and host personal details are removed. This streamlines the dataset by retaining only variables useful for constructing the outcome and predictive features.
+
+## **Explore and Visualize**
+
+Building on the data cleaning and outcome construction in *Part 3*, this section explores the cleaned dataset (**8,883 listings, 14 predictors, 1 outcome**) to uncover key properties before modelling.We focus on **outcome distribution**, **outliers**, **missingness**, **feature–outcome relationships**, and **dimensionality reduction**. Representative predictors are selected to illustrate insights, while complete visualisations are included in the *Appendix*.
+
+```{r load-cleaned-data}
+# Load cleaned dataset
+cleaned_data <- read.csv("data.csv")
+```
+
+#### **Outcome Distribution**
+
+```{r outcome-distribution, fig.width=4.5, fig.height=2.7}
+cleaned_data %>%
+  ggplot(aes(x = outcome, fill = outcome)) +
+  geom_bar() +
+  labs(title = "Distribution of Outcome Classes",
+       x = "Outcome Category", y = "Count") +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 10),
+    plot.title = element_text(hjust = 0.5)
+  )
+```
+
+The constructed outcome categorises listings into First-month, Second-month, Third-month, or Indeterminate depending on which of the next three months has the maximum available days. The outcome distribution is imbalanced: Third-month (36.7%), Indeterminate (34.8%), Second-month (17.2%), and First-month (11.2%). This imbalance highlights the need for evaluation metrics beyond accuracy in later modelling. A tabular summary of outcome counts and percentages is provided in *Appendix B*.
+
+#### **Outliers**
+
+```{r outliers, fig.width=4.5, fig.height=2.7}
+cleaned_data %>%
+  select(price, bedrooms, bathrooms) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>%
+  drop_na(value) %>%
+  ggplot(aes(x = variable, y = value, fill = variable)) +
+  geom_boxplot() +
+  labs(title = "Outliers in Key Numeric Variables",
+       x = "Variable", y = "Value") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Boxplots of price, bedrooms, and bathrooms reveal clear outliers: most prices cluster below AUD 300 but some exceed 900, while most listings have 1–2 rooms but extremes reach 13 bedrooms and 7 bathrooms. Rows with missing values were omitted when plotting boxplots to avoid artefacts; missingness itself is analysed separately in Section 4.0.3. These anomalies reflect heterogeneity in the market and may distort predictions without robust handling. Additional boxplots and histograms for all numeric predictors are shown in *Appendix B*.
+
+#### **Missing Values**
+
+```{r missing_values, fig.width=4.5, fig.height=2.7}
+gg_miss_var(cleaned_data, show_pct = TRUE) +
+  labs(
+    title = "Percentage of Missing Values \nper Variable",
+    x = "Variable",
+    y = "% Missing"
+  ) +
+   theme_minimal(base_size = 11) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 12),   
+    plot.title.position = "panel"                        
+  )
+```
+
+**Missingness** is modest overall. The main contributor is **host_acceptance_rate** (506 missing; 5.7%), followed by **beds** (10; 0.1%) and **bedrooms** (4; 0.05%). All other predictors are complete. We show a **barplot of missingness** (via `naniar::gg_miss_var`, equivalent to `vis_miss` introduced in the class). These patterns align with the raw-data challenges described in *Part 2*. Since missingness indicators were introduced in preprocessing, these gaps remain informative rather than problematic. These missing patterns are unlikely to bias the outcome variable, but may still affect model robustness if not handled properly. A complete missingness profile across variables is provided in **Extended Visualisations**.
+
+#### **Feature-Outcome Relationships**
+
+```{r feature-outcome_relationships, fig.width=4.5, fig.height=2.7}
+# Price vs Outcome
+p1 <- cleaned_data %>%
+  ggplot(aes(x = outcome, y = price, fill = outcome)) +
+  geom_boxplot(outlier.size = 0.7) +
+  labs(title = "Price by Outcome", x = "Outcome", y = "Price (AUD)") +
+  theme_minimal(base_size = 9) +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 9)  
+  )
+
+# Room Type vs Outcome
+p2 <- cleaned_data %>%
+  ggplot(aes(x = room_type, fill = outcome)) +
+  geom_bar(position = "fill") +
+  labs(title = "Room Type vs Outcome", x = "Room Type", y = "Proportion") +
+  theme_minimal(base_size = 9) +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(size = 9)  
+  )
+
+(p1 / p2) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "right")
+```
+
+**Price (top panel):** Listings in *Third-month* display higher-priced outliers, whereas *First-month* clusters at lower values. This suggests that more expensive properties remain available longer, while cheaper listings book out earlier. **Room type (bottom panel):** *Entire homes* dominate *Third-month*, while *non-entire places* appear disproportionately in *Indeterminate*. This indicates that hosting style strongly influences availability patterns.  
+
+#### **Dimensionality Reduction**
+
+```{r dimensionality_reduction, fig.width=4.5, fig.height=2.7}
+# Select numeric predictors (excluding coordinates)
+num_predictors <- cleaned_data %>%
+  select(where(is.numeric)) %>%
+  select(-c(latitude, longitude))
+
+# Remove rows with missing values for PCA
+pca_input <- na.omit(num_predictors)
+
+# Run PCA
+pca_res <- prcomp(pca_input, scale. = TRUE)
+
+# Build a data frame of the first two PCs with outcome labels
+pca_df <- as.data.frame(pca_res$x[, 1:2])
+pca_df$outcome <- cleaned_data$outcome[as.numeric(rownames(pca_df))]
+
+# Scatter plot of PC1 vs PC2
+ggplot(pca_df, aes(x = PC1, y = PC2, color = outcome)) +
+  geom_point(alpha = 0.5, size = 1) +
+  labs(title = "PCA of Numeric Predictors by Outcome") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+PCA was applied to numeric predictors (excluding coordinates), with rows containing missing values omitted. The scatter plot of the first two components shows partial clustering of *Third-month* and *Indeterminate* outcomes, though overlap remains. This indicates that while classes are not linearly separable, linear combinations of predictors capture some meaningful structure. Variance explained by each component is reported in *Appendix B*.  
+
+## **Modelling Plan**
+
+#### **Model Selection**
+
+For this analysis, we will evaluate five candidate models on a standardized feature space to examine key dimensions including linear versus nonlinear approaches, single models versus ensembles, and the interpretability-accuracy trade-off.
+
+We begin with logistic regression as our linear baseline, which provides interpretable coefficients and allows variance control through regularization. K-nearest neighbors (KNN) leverages local similarity in the standardized feature space to capture nonlinear decision boundaries. CART decision trees offer transparent if-then rules and visualizable splitting paths that can be validated against domain knowledge. Random forests employ bagging and feature subsampling to reduce variance and improve robustness while providing stable feature importance measures. Finally, RBF kernel SVM serves as a powerful nonlinear baseline that learns complex decision boundaries through kernel mapping and margin maximization.
+
+This model suite enables us to determine whether performance gains stem from linear effects, neighborhood structure, hierarchical interactions, or high-capacity nonlinear relationships—all methods covered in the course curriculum and well-suited to our dataset characteristics.
+
+#### **Plan for Evaluation**
+
+All models will be trained and compared using identical preprocessing procedures applied to the same design matrix. Numerical variables undergo z-score standardization, categorical variables are one-hot encoded, and zero or near-zero variance columns are removed.
+
+We explicitly exclude any features directly or indirectly derived from the target variable to prevent label leakage. Preprocessing parameters are fitted exclusively on training data and then applied to validation and test sets to maintain strict separation between training and evaluation phases. Using a fixed random seed, we employ stratified 80/20 train-test splitting to preserve class proportions and obtain reliable generalization estimates for same-distribution samples.
+
+Within the training set, we conduct 5-fold cross-validation paired with focused hyperparameter searches tailored to each model: regularization strength for logistic regression, odd values of k for KNN, depth and pruning parameters for decision trees, number of trees and mtry for random forests, and C and γ for SVM. Given potential class imbalance, we use macro-F1 as our primary metric, which treats all classes equally and directly reflects overall classification balance. We additionally report overall accuracy for cross-model comparison and macro ROC-AUC (one-vs-rest averaged) as a threshold-independent separability measure, supplemented by macro PR-AUC when appropriate. Following cross-validation, we select the model with the highest mean macro-F1 and acceptable variance; ties are broken using AUC and interpretability considerations. The final model is retrained on the complete training set with optimal hyperparameters and evaluated exactly once on the held-out test set, reporting accuracy, macro-F1, macro-AUC, and confusion matrices to explicitly show class-specific errors.
+
+For models producing probability outputs, we conduct calibration assessment using Brier scores and reliability curves to ensure meaningful probability interpretation. The entire pipeline documents random seeds, parameter grids, and package versions, with optional sensitivity analysis using different random seeds for robust validation.
+
+In summary, we will conduct fair comparisons of Logistic Regression, KNN, Decision Trees, Random Forest, and RBF-SVM using stratified 80/20 splitting and 5-fold cross-validation on standardized features, employing macro-F1 as the primary selection criterion alongside accuracy and macro ROC-AUC, with single evaluation on an independent test set reporting confusion matrices and optional probability calibration—all procedures fitted solely on training data to prevent information leakage and ensure reproducibility.
+
+## **Appendix**
+
+#### **Reference**
+Airbnb. (n.d.). *What are the requirements to be a host?* Retrieved from <https://www.airbnb.com.au/help/article/2922>
+Inside Airbnb. (2025). *Inside Airbnb - Data source.* Retrieved from <http://insideairbnb.com>
+New South Wales Government. (2010). *Residential Tenancies Act 2010, Section 52.* Retrieved from <https://legislation.nsw.gov.au/view/html/inforce/current/act-2010-042#sec.52>
+
+**Appendix B** extends the main text by providing the **outcome table**, **full numeric histograms** (including capacity features such as beds and bedrooms), and **additional PCA variance explanation**, supporting the analysis in Part 4.  
+
+```{r appendix_b_1, warning=FALSE, fig.width=6, fig.height=4}
+outcome_tab <- cleaned_data %>%
+  count(outcome) %>%
+  mutate(percentage = round(n/sum(n)*100,1))
+kable(outcome_tab, caption = "Outcome Class Distribution")
+```
+Table B1 shows the outcome distribution, consistent with Section 4.1.  
+
+```{r appendix_b_2, warning=FALSE, fig.width=6, fig.height=4}
+cleaned_data %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>%
+  drop_na(value) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  facet_wrap(~ variable, scales = "free_x") +
+  labs(title = "Histograms of All Numeric Variables",
+       x = "Value", y = "Count") +
+  theme_minimal()
+```
+Figure B1 provides full numeric histograms, complementing the outlier analysis in Section 4.2.  
+
+```{r appendix_b_3, warning=FALSE, fig.width=6, fig.height=4}
+pca_var <- pca_res$sdev^2
+pca_var_explained <- pca_var / sum(pca_var)
+barplot(pca_var_explained[1:10],
+        names.arg = 1:10,
+        main = "Variance Explained by Principal Components",
+        xlab = "Principal Component",
+        ylab = "Proportion of Variance",
+        col = "steelblue")
+```
+Figure B2 shows variance explained by PCA components, extending Section 4.5.
+
+

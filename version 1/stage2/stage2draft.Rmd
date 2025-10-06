@@ -1,0 +1,558 @@
+---
+title: "stage2draft"
+author: "Mia"
+date: "2025-10-05"
+output:
+  html_document:
+    number_sections: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(tidyverse)
+library(janitor)
+library(DataExplorer)
+library(ggplot2)
+library(GGally)
+library(skimr)
+
+knitr::opts_chunk$set(warning   = FALSE,message   = FALSE)
+```
+
+# Proposal Draft
+```{r, message=FALSE}
+df <- read_csv("../datasets/cleaned_data.csv")
+```
+
+```{r}
+df <- clean_names(df)
+glimpse(df)
+```
+```{r}
+summary(df)
+```
+
+```{r}
+skim(df)
+```
+
+```{r}
+df$outcome <- as.factor(df$outcome)
+plot_missing(df)
+```
+
+```{r}
+ggplot(df, aes(x = outcome, fill = outcome)) +
+  geom_bar() +
+  geom_text(stat="count", aes(label=..count..), vjust=-0.3) +
+  labs(title = "Distribution of Outcome Variable",
+       y = "Count", x = "Outcome") +
+  theme_minimal(base_size = 12)
+```
+
+```{r}
+num_vars <- df %>%
+  select(where(is.numeric))
+
+plot_density(num_vars)
+
+num_vars_long <- num_vars %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
+
+ggplot(num_vars_long, aes(x = variable, y = value)) +
+  geom_boxplot(outlier.color = "red", fill = "lightblue") +
+  coord_flip() +
+  labs(title = "Boxplots of Numeric Variables",
+       x = "Variable", y = "Value") +
+  theme_minimal()
+```
+
+- 大多数变量（如 `price`, `number_of_reviews`, `reviews_per_month` `calculated_host_listings_count`）呈**右偏分布**，说明少数房源的价格或评论量极高
+- `host_acceptance_rate` 在 100% 附近形成尖峰，表示大部分房东接单率极高
+- `latitude` 与 `longitude` 呈多峰分布，对应多个地理聚集区
+- `maximum_nights` 呈双峰结构（部分房源短租限制，部分允许长期）
+- 多数变量（尤其是 `price`, `number_of_reviews`, `maximum_nights`）存在大量极端值
+- `beds`, `bedrooms`, `bathrooms` 分布集中但存在少量异常高值
+- `host_acceptance_rate`、`latitude`, `longitude` 的离群点较少
+- 异常值主要来自规模大、活跃度高或价格极高的房源
+
+
+- 数据整体非正态、存在强偏态分布
+- 若直接用于线性建模或 PCA，会因尺度与分布差异造成偏差
+- 空间变量（lat/long）应视为**空间特征**而非普通连续特征
+- 异常值不是错误数据，而是“商业高端房源”或“高活跃度房东”的合理反映
+- 不宜简单删除，否则损失信号，应在模型选择时容忍非对称分布
+- 建模时应根据算法敏感度决定是否做截尾或变换
+
+- **建模建议：**
+  - 对右偏变量使用 `log1p()` 转换（如 `price`, `number_of_reviews`, `reviews_per_month`, `calculated_host_listings_count`）
+  - 对线性模型或 PCA，需进行标准化
+  - 对树模型（Decision Tree、Random Forest、XGBoost）可直接使用，无需变换
+  - 地理变量建议转为类别（`neighbourhood_cleansed`）或计算与中心点距离
+  - 若使用线性模型（如 Logistic Regression、SVM），可对极端变量 winsorize（上下截断 1% 或 5%）
+  - 对基于树的模型，可直接保留原值
+  - 若计划使用 PCA，应先 `log` + `scale`，否则高方差变量（如 `price`）会主导主成分
+
+- **模型适用性：**
+  - ✅ 推荐：Random Forest、XGBoost、Decision Tree（对偏态与异常值不敏感,自动忽略异常值影响）；
+  - ⚠️ Logistic Regression / SVM 可用，但需对异常与尺度预处理(`log` + `normalize`)；
+  - ❌ Naïve Bayes 对偏态分布敏感、效果较差。
+  
+
+```{r}
+cor_mat <- cor(num_vars, use = "pairwise.complete.obs")
+corrplot::corrplot(cor_mat, type = "upper", method = "color")
+```
+
+- `bedrooms–beds–bathrooms–price` 区域呈 **强正相关**，说明这几项描述的是同一个“规模维度（size dimension）”。  
+  → **结论：** 高度共线，不能全部直接放进线性模型。  
+  → **建模操作：**
+    - 对 Logistic Regression、SVM 等线性模型，应做 **降维 (PCA)** 或 **Lasso 正则化**；  
+    - 树模型（Decision Tree / Random Forest / XGBoost）能自动分裂并减弱共线性影响，可直接使用。  
+
+- `number_of_reviews–reviews_per_month` 呈 **中等正相关**，属于“活跃度（activity）”维度。  
+  → **结论：** 信号相近，但不是完全重复。  
+  → **建模操作：** 可以组合为一个 `activity_index`；也可以两者都保留，观察模型重要性。  
+
+- `latitude`、`longitude` 与其他变量相关性极低。  
+  → **结论：** 位置变量在线性模型中线性信号弱，但可能存在非线性空间模式。  
+  → **建模操作：**
+    - 可转化为 `neighbourhood_cleansed` 类别特征或距离特征；  
+    - 或依靠非线性模型（RF / XGB / SVM-RBF）捕捉空间关系。  
+
+- 整体相关性大多为正，无明显负相关。  
+  → **结论：** 数据分布方向一致，风险在于冗余而非冲突。  
+  → **建模影响：**
+    - **可用模型：** Tree-based（RF、XGB）、正则化回归。  
+    - **不推荐：** 纯多变量 Logistic（无正则化）或 Naïve Bayes（假设独立性被破坏）。
+
+```{r}
+num_df <- df %>%
+  select(where(is.numeric))
+GGally::ggcorr(num_df,
+               label = TRUE, label_round = 2,
+               hjust = 0.8, size = 3,
+               low = "blue", high = "red") +
+  labs(title = "Correlation Matrix of Numeric Variables") +
+  theme_minimal(base_size = 10)
+```
+
+- `bedrooms–beds` **r≈0.82**、`bathrooms–bedrooms` **r≈0.69**、`beds–price` **r≈0.54**  
+  → **结论：** 多重共线性严重。  
+  → **建模影响：**
+    - Logistic Regression 若不正则化，参数估计将不稳定；  
+    - Naïve Bayes 假设变量独立，不再适用；  
+    - PCA、Lasso、Ridge、树模型可继续使用。  
+
+- `number_of_reviews–reviews_per_month` **r≈0.49**，属中度共线。  
+  → **结论：** 活跃度特征一致，但仍携带不同时间尺度信息。  
+  → **建模操作：** 可同时保留，观察哪一项在特征重要性中权重更高。  
+
+- `host_acceptance_rate–reviews_per_month` **r≈0.32**，弱正相关。  
+  → **结论：** 响应积极的房东出租活跃，但信号较弱，可留待模型自行判断。  
+
+- `latitude`、`longitude` 与其他变量 |r| < 0.1。  
+  → **结论：** 地理特征无明显线性关系。  
+  → **建模操作：**
+    - 在非线性模型中保留，用于发现空间模式；  
+    - 或通过聚类（如按 `neighbourhood` 分组）增强信号。  
+
+- **总体结论与模型建议：**  
+  - 数据存在两组潜在因子：  
+    ① 结构/规模（bedrooms, beds, bathrooms, price）  
+    ② 活跃度（reviews, acceptance rate）  
+  - 线性模型需做变量选择或正则化。  
+  - **推荐模型：** Lasso Logistic、Decision Tree、Random Forest、XGBoost。  
+  - **不推荐模型：** Naïve Bayes（独立性假设不成立），普通 Logistic（不稳定）。
+
+```{r}
+cat_vars <- df %>%
+  select(where(is.character) | where(is.factor))
+for (v in head(names(cat_vars), 5)) {
+  print(
+    ggplot(df, aes_string(x = v, fill = "outcome")) +
+      geom_bar(position = "fill") +
+      labs(title = paste("Proportion of Outcome by", v),
+           y = "Proportion") +
+      theme_minimal()
+  )
+}
+```
+
+- 不同社区的 outcome 分布差异明显；部分城区（如中心城区）中 “Indeterminate” 占比更高，而部分周边区的 “Third-month” 占比更高。  
+- “Entire home/apt” 与 “Non-entire place” 的 outcome 分布差异较小，但整体上 “Third-month” 占比略高于 “First-month”。
+- 数据集中 “Third-month” 与 “Indeterminate” 样本最多，占总样本的约 70%；“First-month” 为明显的少数类（约 11%）。  
+
+- 地理位置对房源未来可用性（或空房周期）有显著影响，说明 `neighbourhood_cleansed` 是一个具有区分度的分类特征。
+- 房型变量的区分度较低，但仍携带部分信息（整套出租更可能空房时间长）。
+- 分类任务存在 **显著类别不平衡**，若直接建模将偏向预测多数类。  
+
+- **建模建议：**
+  - 应保留此变量，可使用 **one-hot 编码** 或合并稀有类别（`step_other`）；  
+  - 空间差异是非线性的，**树模型（RF、XGBoost）** 可直接利用该特征；  
+  - 若使用线性模型，可考虑引入目标编码（target encoding）或 PCA 编码以控制高维稀疏性。  
+  - 仍应保留 `room_type` 作为特征，但其预测能力有限；  
+  - 若与价格、房间数等组合特征（如 “整套且高价”），效果可能增强；  
+  - 可在树模型中自动交互建模，也可在回归模型中加入交互项。 
+  - 需在建模阶段应用 **类别平衡策略**：
+    - 过采样：`SMOTE`、`ROSE`；  
+    - 欠采样：`downsample`；  
+    - 或设置 **class weights**（如 `ranger`、`xgboost`、`svm_rbf`）。  
+  - 评价指标应使用 **macro F1-score** 或 **balanced accuracy** 而非普通 accuracy。  
+
+- **模型适用性：**
+  - ✅ 推荐：Decision Tree、Random Forest、XGBoost（可直接捕捉类别差异）  
+  - ✅ 推荐：Random Forest / XGBoost（能自动捕捉交互）  
+  - ✅ 推荐：SVM-RBF（支持类权重）、Random Forest（可调 class weight）、XGBoost（支持 scale_pos_weight）
+  - ⚠️ Logistic Regression 可保留但需调整权重或重采样, 与数值变量交互
+  - ⚠️ 线性模型需处理高基数类别，否则过拟合
+  - ❌ Naïve Bayes 假设独立性被破坏, 类别过多、概率估计不稳定, 不平衡数据（会偏向多数类）
+
+
+
+| 模型类型 | 模型名称 | 作用 | 备注 |
+|-----------|-----------|------|-----------|------|
+| 线性基线 | Lasso Logistic Regression | 解释性强，验证线性可分性 | 用正则化控制共线性；先 log + scale |
+| 非线性（弱模型） | Decision Tree | 可解释、快速 baseline | 作为简单树基线，对比复杂模型|
+| 非线性（集成主力） | Random Forest | 稳定强大、无需特征变换 可自然处理非线性与交互|
+| 非线性（提升型） | XGBoost | 性能最强，适合混合类型特征| 调参略复杂，注意 class_weight |
+
+*在报告部分，体现系统性和完整性：展示 3–5个模型的对比结果，通过表格和文字说明各模型的性能差异，并解释超参数选择与正则化逻辑，以体现分析的深度和科学性。报告中通常包含混淆矩阵、特征重要性图和总体性能表，用“系统性比较分析”的语气呈现。*
+
+*Presentation阶段，重点在于清晰和故事性。聚焦于表现最好的一个模型，用简洁语言说明为什么它效果最好，讲模型背后的直觉和关键发现，而非技术细节。展示中可配合两到三个直观图表（如特征重要性图和混淆矩阵），让听众快速理解模型表现。整体语气更具叙事性，类似于“我们比较了多种模型，最终发现x表现最稳定、最准确”。*
+
+
+Macro-F1 是各类别 F1-score 的算术平均，用于衡量模型在不平衡多分类任务中的总体表现：
+
+$$
+F1_i = \frac{2 \times \text{Precision}_i \times \text{Recall}_i}
+              {\text{Precision}_i + \text{Recall}_i}
+$$
+
+$$
+\text{Macro-F1} = \frac{1}{K} \sum_{i=1}^{K} F1_i
+$$
+其中 \( K \) 为类别总数。
+
+Accuracy 衡量模型预测正确的样本比例：
+
+$$
+\text{Accuracy} = \frac{TP + TN}{TP + TN + FP + FN}
+$$
+对于多分类任务，可写为：
+$$
+\text{Accuracy} = \frac{\sum_{i=1}^{K} TP_i}{N}
+$$
+其中 \( TP_i \) 表示第 \( i \) 类被正确预测的样本数，\( N \) 为总样本数。
+
+在多分类任务中，Macro ROC-AUC 通过 One-vs-Rest（OvR）方式计算：
+$$
+\text{AUC}_i = \int_0^1 TPR_i(FPR_i^{-1}(x)) \, dx
+$$
+
+$$
+\text{Macro ROC-AUC} = \frac{1}{K} \sum_{i=1}^{K} \text{AUC}_i
+$$
+其中：
+- \( TPR_i = \frac{TP_i}{TP_i + FN_i} \) 为真正率；
+- \( FPR_i = \frac{FP_i}{FP_i + TN_i} \) 为假正率。
+
+# Model Draft
+```{r}
+library(tidymodels)
+library(themis)
+library(yardstick)
+library(kableExtra)
+```
+
+```{r}
+set.seed(5003)
+df$outcome <- as.factor(df$outcome)
+
+split <- initial_split(df, prop = 0.8, strata = outcome)
+train <- training(split); test <- testing(split)
+folds <- vfold_cv(train, v = 10, strata = outcome)
+
+rec <- recipe(outcome ~ ., data = train) |>
+  step_string2factor(all_nominal_predictors()) |>
+  step_other(neighbourhood_cleansed, threshold = 0.01) |>
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) |>
+  step_impute_median(all_numeric_predictors()) |>
+  step_log(price, number_of_reviews, reviews_per_month,
+           offset = 1, skip = TRUE) |>
+  step_normalize(all_numeric_predictors())
+
+metric_set_all <- metric_set(accuracy, f_meas, roc_auc)
+```
+
+```{r}
+# Lasso Logistic
+mod_lasso <- multinom_reg(penalty = tune(), mixture = 1) |>
+  set_engine("glmnet") |> set_mode("classification")
+
+# Decision Tree
+mod_tree <- decision_tree(tree_depth = tune(), cost_complexity = tune()) |>
+  set_engine("rpart") |> set_mode("classification")
+
+# Random Forest
+mod_rf <- rand_forest(mtry = tune(), trees = 600, min_n = tune()) |>
+  set_engine("ranger", importance = "impurity") |> set_mode("classification")
+
+# XGBoost
+mod_xgb <- boost_tree(trees = 1000, learn_rate = tune(), tree_depth = tune(),
+                      loss_reduction = tune(), min_n = tune()) |>
+  set_engine("xgboost", eval_metric = "mlogloss") |> set_mode("classification")
+```
+
+```{r}
+wf_lasso <- workflow() |> add_model(mod_lasso) |> add_recipe(rec)
+wf_tree  <- workflow() |> add_model(mod_tree)  |> add_recipe(rec)
+wf_rf    <- workflow() |> add_model(mod_rf)    |> add_recipe(rec)
+wf_xgb   <- workflow() |> add_model(mod_xgb)   |> add_recipe(rec)
+grid_lasso <- grid_regular(penalty(range = c(-5, 1)), levels = 6)
+grid_tree  <- grid_regular(tree_depth(), cost_complexity(), levels = 5)
+grid_rf    <- grid_regular(mtry(range = c(3L, 12L)), min_n(), levels = 5)
+
+grid_xgb <- grid_random(
+  learn_rate(range = c(0.01, 0.3)),
+  tree_depth(range = c(3L, 10L)),
+  loss_reduction(range = c(0, 2)),
+  min_n(range = c(2L, 10L)),
+  size = 20
+)
+```
+
+```{r}
+library(ranger)
+library(xgboost)
+# Lasso
+res_lasso <- tune_grid(wf_lasso, resamples = folds, grid = grid_lasso, metrics = metric_set_all)
+best_lasso <- select_best(res_lasso, metric = "f_meas")
+final_lasso <- finalize_workflow(wf_lasso, best_lasso) |> fit(train)
+
+# Decision Tree
+res_tree <- tune_grid(wf_tree, resamples = folds, grid = grid_tree, metrics = metric_set_all)
+best_tree <- select_best(res_tree, metric = "f_meas")
+final_tree <- finalize_workflow(wf_tree, best_tree) |> fit(train)
+
+# Random Forest
+res_rf <- tune_grid(wf_rf, resamples = folds, grid = grid_rf, metrics = metric_set_all)
+best_rf <- select_best(res_rf, metric = "f_meas")
+final_rf <- finalize_workflow(wf_rf, best_rf) |> fit(train)
+
+# XGBoost
+res_xgb <- tune_grid(wf_xgb, resamples = folds, grid = grid_xgb, metrics = metric_set_all)
+best_xgb <- select_best(res_xgb, metric = "f_meas")
+final_xgb <- finalize_workflow(wf_xgb, best_xgb) |> fit(train)
+```
+
+```{r}
+eval_metrics <- function(model_fit, test_data) {
+  test_data$outcome <- factor(test_data$outcome,
+                              levels = levels(train$outcome))
+  
+  pred <- predict(model_fit, test_data, type = "prob") |>
+    bind_cols(predict(model_fit, test_data)) |>
+    bind_cols(test_data |> select(outcome))
+  
+  acc <- accuracy(pred, truth = outcome, estimate = .pred_class) |> pull(.estimate)
+  f1  <- f_meas(pred, truth = outcome, estimate = .pred_class, estimator = "macro") |> pull(.estimate)
+  
+  auc <- tryCatch({
+    roc_auc(pred, truth = outcome,
+            dplyr::matches("^\\.pred_(?!class)", perl = TRUE),
+            estimator = "hand_till") |>
+      dplyr::pull(.estimate) |>
+      as.numeric()
+  }, error = function(e) NA_real_)
+  
+  tibble(Accuracy = acc, Macro_F1 = f1, Macro_ROC_AUC = auc)
+}
+```
+
+```{r}
+test$outcome <- factor(test$outcome, levels = levels(train$outcome))
+
+results <- bind_rows(
+  eval_metrics(final_lasso, test) |> mutate(Model = "Lasso Logistic Regression"),
+  eval_metrics(final_tree,  test) |> mutate(Model = "Decision Tree"),
+  eval_metrics(final_rf,    test) |> mutate(Model = "Random Forest"),
+  eval_metrics(final_xgb,   test) |> mutate(Model = "XGBoost")
+) |> select(Model, Accuracy, Macro_F1, Macro_ROC_AUC)
+
+kable(results,
+      digits = 3, align = "c") |>
+  kable_styling(full_width = FALSE, position = "center",
+                bootstrap_options = c("hover", "condensed"))
+```
+模型整体准确率约为 0.37–0.47，Macro-F1 指标约为 0.36–0.53，Macro ROC-AUC 约为 0.50–0.64
+
+Random Forest 在三项指标中表现最佳（Accuracy ≈ 0.47，AUC ≈ 0.63）
+
+模型虽能捕捉到一定的判别信号，但整体预测能力有限，表现远低于常规可预测任务（通常 Accuracy > 0.8）
+
+尽管 outcome 来源于原始数据的可用天数 (availability_30, availability_60, availability_90)，但其实质是对“相对月度空房趋势”的分类编码。
+由于多数房源在三个月内的可用天数差异极小（往往仅相差数日），标签本身存在较强的模糊性与噪声。
+
+此外，从 EDA 与 PCA 可视化结果可见：
+
+四类 outcome 在特征空间中的分布高度重叠；
+
+特征如 price、beds、bathrooms 等在各类之间无明显分区；
+
+说明特征对 outcome 的可分性较弱（weak separability）。
+
+因此，即便模型架构复杂、非线性（如 XGBoost），其性能提升也受限于输入特征的信息量，而非模型表达力。
+
+这些结果表明模型并非完全失效，而是受限于标签定义与特征解释力。
+AUC 大于 0.6 已说明模型能部分识别某些类别的特征模式，但分类边界模糊。
+
+- 标签噪声（Label noise）：outcome 基于数值差异极小的三个连续变量推导，许多样本近似随机分配至不同类别。
+
+- 特征缺乏判别力（Low feature discrimination）：现有特征主要描述 listing 的结构与定价，对未来月度出租变化的预测性有限。
+
+- 类别不平衡（Class imbalance）：“Indeterminate” 类占比较高，导致模型倾向预测该类，压低 Macro-F1。
+
+- 任务定义问题（Task framing）：预测“哪个月最空”属于高噪声任务，本质上更接近模式探索（exploratory modelling）而非 deployable prediction。
+
+改进方向
+
+- 标签优化：去除 “Indeterminate” 类样本，减少模糊边界。
+
+- 特征工程：引入差值与波动特征，如
+`delta_1m = availability_60 - availability_30`，`var_3m = var(c(avail_30, avail_60, avail_90))`
+
+- 采样平衡：在建模前应用 up/down-sampling 平衡类别。
+
+```{r}
+orig = read_csv("../datasets/listings.csv")
+
+set.seed(5003)
+
+#Step0 Drop the irrelevant columns
+
+#Drop the columns which are irrelevant for prediction, sensitive, redundant, or unusable.
+DROP <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "host_id","id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "accommodates",  "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review", "host_tenure", "listing_age" , "bathrooms_text", "host_location","host_since", "first_review","number_of_reviews_ltm" ,"number_of_reviews_l30d", "last_scraped","license","has_availability", "availability_365", "minimum_nights", "host_total_listings_count", "instant_bookable", "month1","month2","month3")
+
+step1 <- orig %>%
+  
+# step1 Clean and engineer multiple features
+  
+  # Fill bathrooms from bathrooms_text if missing; "half"=0.5 else extract number
+  mutate(bathrooms = coalesce(bathrooms,case_when(str_detect(bathrooms_text, regex("half", ignore_case = TRUE)) ~ 0.5,TRUE ~ as.numeric(str_extract(bathrooms_text, "\\d+(?:\\.\\d+)?")))),
+         
+    # Parse dates to Date objects
+    host_since = ymd(host_since),
+    first_review = ymd(first_review),
+    last_scraped = ymd(last_scraped),
+  
+    # Calculate host tenure and listing age in days
+    host_tenure = as.numeric(last_scraped - host_since, units = "days"),
+    listing_age = as.numeric(last_scraped - first_review, units = "days"),
+    
+    # Neighborhood overview: 1 if non-empty, else 0
+    neighborhood_overview = ifelse(!is.na(neighborhood_overview) & neighborhood_overview != "", 1, 0),
+    host_acceptance_rate = as.numeric(str_remove(host_acceptance_rate, "%")),
+    
+    # Remove "%", "$" and convert to numeric
+    price = as.numeric(str_remove(price, "[$]")))
+  
+  
+# step 2 sanity check and filtering stage
+step2 <- step1 %>%
+  filter(across(.cols = where(is.numeric) & !c("longitude", "latitude"), .fns  = ~ is.na(.x) | .x >= 0),# Keep only non-negative numeric values (except lat/long)
+    price > 0,                               # Require positive price
+    host_tenure >= listing_age,              # Ensure host tenure >= listing age       
+    str_detect(host_location, "Australia"),  # Host must be located in Australia
+    license != "",                           # License field must not be empty
+    price != "",                             # Price field must not be blank
+    has_availability != "",                  # Availability field must not be blank
+    bathrooms != 0)                   
+
+# step 3
+cleaned <- step2 %>%
+  # Create monthly availability windows
+  mutate(
+    month1 = availability_30,                        # Availability in the first 30 days
+    month2 = availability_60 - availability_30,      # Availability in days 31–60
+    month3 = availability_90 - availability_60) %>%       # Availability in days 61–90
+  rowwise() %>%
+  # Define outcome category based on the month with maximum availability
+  mutate(
+    outcome = {
+      vals <- c(month1, month2, month3)              # Collect availability values
+      max_val <- max(vals, na.rm = TRUE)             # Find maximum availability
+      if (sum(vals == max_val, na.rm = TRUE) > 1) {  # If tie across months
+        "Indeterminate"                              # → Assign as Indeterminate
+      } else {
+        which_max <- which.max(vals)                 # Otherwise, get index of max
+        c("First-month", "Second-month", "Third-month")[which_max]}}) %>%  # Map to category
+  ungroup() %>%  # Return to ungrouped data frame
+
+# step 4  
+  select(-any_of(DROP)) # Drop all columns listed in DROP
+```
+
+```{r}
+set.seed(5003)
+df2 <- cleaned |> 
+  filter(outcome != "Indeterminate") |> 
+  mutate(outcome = factor(outcome),
+    delta_1m = availability_60 - availability_30,
+    delta_2m = availability_90 - availability_60,
+    var_3m   = apply(
+      cbind(availability_30, availability_60, availability_90), 1, var))
+```
+
+```{r}
+set.seed(5003)
+split2 <- initial_split(df2, prop = 0.8, strata = outcome)
+train2 <- training(split2)
+test2  <- testing(split2)
+folds2 <- vfold_cv(train2, v = 10, strata = outcome)
+
+rec2 <- recipe(outcome ~ ., data = train2) |>
+  step_string2factor(all_nominal_predictors()) |>
+  step_other(neighbourhood_cleansed, threshold = 0.01) |>
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) |>
+  step_log(price, number_of_reviews, reviews_per_month, offset = 1) |>
+  step_normalize(all_numeric_predictors()) |>
+  step_upsample(outcome)
+```
+
+```{r}
+wf_rf2 <- workflow() |> add_model(mod_rf) |> add_recipe(rec2)
+res_rf2 <- tune_grid(
+  wf_rf2, resamples = folds2, grid = grid_rf,
+  metrics = metric_set(accuracy, f_meas, roc_auc)
+)
+best_rf2 <- select_best(res_rf2, metric = "f_meas")
+final_rf2 <- finalize_workflow(wf_rf2, best_rf2) |> fit(train2)
+```
+
+```{r}
+pred_rf2 <- predict(final_rf2, test2, type = "prob") |>
+  bind_cols(predict(final_rf2, test2)) |>
+  bind_cols(test2 |> select(outcome))
+
+acc <- accuracy(pred_rf2, truth = outcome, estimate = .pred_class)$.estimate
+f1  <- f_meas(pred_rf2, truth = outcome, estimate = .pred_class, estimator = "macro")$.estimate
+auc <- roc_auc(pred_rf2, truth = outcome,
+               dplyr::matches("^\\.pred_(?!class)", perl = TRUE),
+               estimator = "hand_till")$.estimate
+
+results2 <- tibble(
+  Model = "Random Forest (Improved)",
+  Accuracy = acc,
+  Macro_F1 = f1,
+  Macro_ROC_AUC = auc
+)
+
+library(kableExtra)
+results2 |>
+  mutate(across(where(is.numeric), ~ round(., 3))) |>
+  kable(align = "c") |>
+  kable_styling(full_width = FALSE, position = "center",
+                bootstrap_options = c("hover", "condensed"))
+```

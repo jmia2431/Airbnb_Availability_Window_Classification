@@ -1,0 +1,138 @@
+---
+title: "stage2dataprepare"
+author: "mia"
+date: "2025-10-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(tidyverse)
+library(janitor)
+library(DataExplorer)
+library(ggplot2)
+library(GGally)
+library(skimr)
+library(tidymodels)
+library(themis)
+library(yardstick)
+library(kableExtra)
+library(doParallel)
+df <- read_csv("../datasets/cleaned_data.csv")
+df <- df |> 
+  filter(outcome != "Indeterminate") |> 
+  select(-room_type, -neighborhood_overview) |> 
+  mutate(outcome = factor(outcome)) |>
+  select(-beds)
+```
+
+```{r}
+df$outcome <- as.factor(df$outcome)
+plot_missing(df)
+```
+
+```{r}
+ggplot(df, aes(x = outcome, fill = outcome)) +
+  geom_bar() +
+  geom_text(stat="count", aes(label=..count..), vjust=-0.3) +
+  labs(title = "Distribution of Outcome Variable",
+       y = "Count", x = "Outcome") +
+  theme_minimal(base_size = 12)
+```
+
+```{r}
+num_vars <- df %>%
+  select(where(is.numeric))
+plot_density(num_vars)
+```
+
+```{r}
+corr_mat <- cor(num_vars, use = "pairwise.complete.obs")
+corr_melt <- melt(corr_mat)
+ggplot(corr_melt, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(value, 2)), size = 2) +
+  scale_fill_gradient2(low = "blue", high = "red", limits = c(-1, 1)) +
+  theme_minimal() +
+  labs(
+    title = "Full Correlation Matrix of Numeric Variables",
+    x = NULL, y = NULL, fill = "r"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    panel.grid = element_blank()
+  )
+```
+
+```{r}
+cat_vars <- df %>%
+  select(where(is.character) | where(is.factor))
+for (v in head(names(cat_vars), 5)) {
+  print(
+    ggplot(df, aes_string(x = v, fill = "outcome")) +
+      geom_bar(position = "fill") +
+      labs(title = paste("Proportion of Outcome by", v),
+           y = "Proportion") +
+      theme_minimal())}
+```
+
+```{r}
+# 选取数值变量（去掉 outcome）
+df_num <- df |> 
+  select(where(is.numeric)) |> 
+  drop_na()
+# 标准化 + PCA
+pca_res <- prcomp(df_num, center = TRUE, scale. = TRUE)
+summary(pca_res)
+```
+
+
+```{r}
+#data split + cv
+split <- initial_split(df, prop = 0.8, strata = outcome)
+train <- training(split)
+test <- testing(split)
+folds <- vfold_cv(train, v = 10, strata = outcome)
+
+# 把rec放在workflow里会在每一折里自动对当前fold的训练子集prep()一次recipe，对验证子集bake()一次recipe然后训练并评估模型。
+rec <- recipe(outcome ~ ., data = train) |>
+  step_string2factor(all_nominal_predictors()) |> 
+  step_other(neighbourhood_cleansed, threshold = 0.02) |> 
+  step_impute_median(all_numeric_predictors()) |> 
+  step_log(price, number_of_reviews, reviews_per_month, offset = 1) |> 
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) |> 
+  step_normalize(all_numeric_predictors()) |>
+  step_upsample(outcome)
+
+# metric set
+metric_set_all <- metric_set(accuracy, f_meas, roc_auc)
+
+# metric function, input model+test data return performance in tibble
+eval_metrics <- function(model_fit, test_data) {
+  test_data$outcome <- factor(test_data$outcome,
+                              levels = levels(train$outcome))
+  pred <- predict(model_fit, test_data, type = "prob") |>
+    bind_cols(predict(model_fit, test_data)) |>
+    bind_cols(test_data |> select(outcome))
+  
+  acc <- accuracy(pred, truth = outcome, estimate = .pred_class) |> pull(.estimate)
+  f1  <- f_meas(pred, truth = outcome, estimate = .pred_class, estimator = "macro") |> pull(.estimate)
+  auc <- tryCatch({
+    roc_auc(pred, truth = outcome,
+            dplyr::matches("^\\.pred_(?!class)", perl = TRUE),
+            estimator = "hand_till") |>
+      dplyr::pull(.estimate) |>
+      as.numeric()
+  }, error = function(e) NA_real_)
+  
+  tibble(Accuracy = acc, Macro_F1 = f1, Macro_ROC_AUC = auc)
+}
+```
+
+```{r}
+# Logistic Regression
+# KNN
+# Decision Trees
+# Random Forest
+# RBF-SVM
+```

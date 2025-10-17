@@ -24,7 +24,7 @@ library(stringr)
 library(scales)
 library(gridExtra)
 library(reshape2)
-orig_data = read.csv("datasets/listings.csv")
+orig_data = read.csv("../datasets/listings.csv")
 ```
 
 # Define the Problem
@@ -95,7 +95,7 @@ set.seed(5003)
 #Step0 Drop the irrelevant columns
 
 #Drop the columns which are irrelevant for prediction, sensitive, redundant, or unusable.
-DROP <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "host_id","id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "accommodates",  "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review", "host_tenure", "listing_age" , "bathrooms_text", "host_location","host_since", "first_review","number_of_reviews_ltm" ,"number_of_reviews_l30d", "last_scraped","license","has_availability", "availability_365", "minimum_nights", "host_total_listings_count", "instant_bookable", "month1","month2","month3","availability_30","availability_60","availability_90")
+DROP <- c("scrape_id","host_name", "host_about", "host_thumbnail_url", "host_picture_url", "host_id","id", "listing_url", "name", "description", "picture_url", "host_url", "host_neighbourhood", "availability_eoy", "number_of_reviews_ly", "estimated_occupancy_l365d", "estimated_revenue_l365d", "source", "host_response_time", "host_response_rate", "host_is_superhost", "host_verifications", "host_has_profile_pic", "host_identity_verified","neighbourhood", "amenities","calendar_updated", "calendar_last_scraped","review_scores_rating", "review_scores_accuracy","review_scores_cleanliness", "review_scores_checkin","review_scores_communication", "accommodates",  "review_scores_location","review_scores_value","property_type", "calendar_updated", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm","neighbourhood_group_cleansed", "host_listings_count", "calculated_host_listings_count_entire_homes", "calculated_host_listings_count_private_rooms", "calculated_host_listings_count_shared_rooms", "last_review", "host_tenure", "listing_age" , "bathrooms_text", "host_location","host_since", "first_review","number_of_reviews_ltm" ,"number_of_reviews_l30d", "last_scraped","license","has_availability", "availability_365", "minimum_nights", "host_total_listings_count", "instant_bookable", "month1","month2","month3")
 
 step1 <- orig_data %>%
   
@@ -156,6 +156,9 @@ cleaned_data <- step2 %>%
   select(-any_of(DROP)) # Drop all columns listed in DROP
 ```
 
+```{r}
+write_excel_csv(cleaned_data, "cleaned_data_update.csv")
+```
 ### Step0 Drop the irrelevant columns
 In the initial preprocessing stage, variables irrelevant for prediction, sensitive, or redundant were removed to streamline the dataset and reduce bias. These include unique identifiers (`id`, `scrape_id`), free-text fields (`name`, `description`, `host_about`), URLs and images (`listing_url`, `picture_url`), geographic coordinates (`latitude`, `longitude`), and host personal details (`host_name`, `host_url`, `host_location`). Redundant features such as the `review_scores_xxx` family and `property_type` (overlapping with `room_type`) were also discarded. While this summary outlines the main categories, the full list of dropped variables is preserved in the code for transparency and reproducibility.  
 

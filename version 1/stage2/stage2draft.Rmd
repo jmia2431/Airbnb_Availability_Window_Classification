@@ -264,6 +264,9 @@ library(tidymodels)
 library(themis)
 library(yardstick)
 library(kableExtra)
+library(doParallel)
+cores <- detectCores() - 1
+registerDoParallel(cores = cores)
 ```
 
 ```{r}
@@ -276,7 +279,7 @@ folds <- vfold_cv(train, v = 10, strata = outcome)
 
 rec <- recipe(outcome ~ ., data = train) |>
   step_string2factor(all_nominal_predictors()) |>
-  step_other(neighbourhood_cleansed, threshold = 0.01) |>
+  step_other(neighbourhood_cleansed, threshold = 0.02) |>
   step_dummy(all_nominal_predictors(), one_hot = TRUE) |>
   step_impute_median(all_numeric_predictors()) |>
   step_log(price, number_of_reviews, reviews_per_month,
@@ -296,11 +299,11 @@ mod_tree <- decision_tree(tree_depth = tune(), cost_complexity = tune()) |>
   set_engine("rpart") |> set_mode("classification")
 
 # Random Forest
-mod_rf <- rand_forest(mtry = tune(), trees = 600, min_n = tune()) |>
+mod_rf <- rand_forest(mtry = tune(), trees = 300, min_n = tune()) |>
   set_engine("ranger", importance = "impurity") |> set_mode("classification")
 
 # XGBoost
-mod_xgb <- boost_tree(trees = 1000, learn_rate = tune(), tree_depth = tune(),
+mod_xgb <- boost_tree(trees = 300, learn_rate = tune(), tree_depth = tune(),
                       loss_reduction = tune(), min_n = tune()) |>
   set_engine("xgboost", eval_metric = "mlogloss") |> set_mode("classification")
 ```
@@ -310,16 +313,16 @@ wf_lasso <- workflow() |> add_model(mod_lasso) |> add_recipe(rec)
 wf_tree  <- workflow() |> add_model(mod_tree)  |> add_recipe(rec)
 wf_rf    <- workflow() |> add_model(mod_rf)    |> add_recipe(rec)
 wf_xgb   <- workflow() |> add_model(mod_xgb)   |> add_recipe(rec)
-grid_lasso <- grid_regular(penalty(range = c(-5, 1)), levels = 6)
-grid_tree  <- grid_regular(tree_depth(), cost_complexity(), levels = 5)
-grid_rf    <- grid_regular(mtry(range = c(3L, 12L)), min_n(), levels = 5)
+grid_lasso <- grid_regular(penalty(range = c(-5, 0)), levels = 3)
+grid_tree  <- grid_regular(tree_depth(), cost_complexity(), levels = 3)
+grid_rf    <- grid_regular(mtry(range = c(3L, 10L)), min_n(), levels = 3)
 
 grid_xgb <- grid_random(
-  learn_rate(range = c(0.01, 0.3)),
-  tree_depth(range = c(3L, 10L)),
-  loss_reduction(range = c(0, 2)),
-  min_n(range = c(2L, 10L)),
-  size = 20
+  learn_rate(range = c(0.05, 0.3)),
+  tree_depth(range = c(3L, 8L)),
+  loss_reduction(range = c(0, 1)),
+  min_n(range = c(2L, 8L)),
+  size = 5
 )
 ```
 

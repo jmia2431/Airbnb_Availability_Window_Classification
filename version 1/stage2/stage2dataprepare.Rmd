@@ -18,6 +18,7 @@ library(themis)
 library(yardstick)
 library(kableExtra)
 library(doParallel)
+library(reshape2)
 df <- read_csv("../datasets/cleaned_data.csv")
 df <- df |> 
   filter(outcome != "Indeterminate") |> 

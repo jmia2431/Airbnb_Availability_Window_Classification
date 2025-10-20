@@ -1,0 +1,50 @@
+---
+title: "title"
+subtitle: "subtitle"
+author: ""
+institute: ""
+date: "date (updated: `r Sys.Date()`)"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+# Project Topic
+- motivation
+---
+# Research Question & Why it matters?
+- research question
+- why it matters
+- hypothesis
+---
+# How you process the data?
+- data source: origin, coverage, number of observations and attributes
+- data cleaning process
+---
+# What Does Your Data Look Like?
+- statistical summary
+- key variable distributions
+- relationships between features
+- patterns (if any)
+---
+# Data Preprocess
+- steps applied before training models
+- train/test split & cross-validation
+---
+# What model(s) are you using? Why?
+- definition, assumption, interpretability, tune
+- performance metrics selection
+---
+# Key Results and Visuals
+- result for performance metrics in table
+- visual of actual vs predicted and tuning result for best model
+---
+# Final Insighs: What have you learned & link back to the research problem
+- findings
+- answer research question
+- reflect result in real life
+- limitation
+- future direction

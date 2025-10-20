@@ -20,31 +20,10 @@ library(skimr)
 knitr::opts_chunk$set(warning   = FALSE,message   = FALSE)
 ```
 
-# Proposal Draft
 ```{r, message=FALSE}
 df <- read_csv("../datasets/cleaned_data.csv")
 ```
 
-
-```{r}
-num_vars <- df %>%
-  select(where(is.numeric))
-
-plot_density(num_vars)
-
-num_vars_long <- num_vars %>%
-  pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
-
-ggplot(num_vars_long, aes(x = variable, y = value)) +
-  geom_boxplot(outlier.color = "red", fill = "lightblue") +
-  coord_flip() +
-  labs(title = "Boxplots of Numeric Variables",
-       x = "Variable", y = "Value") +
-  theme_minimal()
-```
-
-
-# Model Draft
 ```{r}
 library(tidymodels)
 library(themis)
@@ -62,7 +41,6 @@ df <- df |>
   mutate(outcome = factor(outcome)) |>
   select(-beds)
 ```
-
 
 ```{r}
 split <- initial_split(df, prop = 0.8, strata = outcome)
@@ -87,29 +65,23 @@ metric_set_all <- metric_set(accuracy, f_meas, roc_auc)
 library(ranger)
 library(xgboost)
 set.seed(5003)
-# 模型（多分类逻辑回归）
+
+# Logit
 mod_logit <- multinom_reg(
-  penalty = tune(),   # 调参用
-  mixture = 0         # 0 = ridge 正则化 (更稳)
-) |>
+  penalty = tune(),
+  mixture = 0 ) |>
   set_engine("glmnet") |>
   set_mode("classification")
-
-# 工作流
 wf_logit <- workflow() |>
   add_model(mod_logit) |>
   add_recipe(rec)
-
 grid_logit <- grid_regular(penalty(range = c(-4, 0)), levels = 10)
-
-# 交叉验证
 res_logit <- tune_grid(
   wf_logit,
   resamples = folds,
   grid = grid_logit,
   metrics = metric_set(accuracy, f_meas, roc_auc)
 )
-
 best_logit <- select_best(res_logit, metric = "f_meas")
 final_logit <- finalize_workflow(wf_logit, best_logit)
 fit_logit <- fit(final_logit, data = train)
@@ -190,8 +162,4 @@ kable(results,
       digits = 3, align = "c") |>
   kable_styling(full_width = FALSE, position = "center",
                 bootstrap_options = c("hover", "condensed"))
-```
-
-```{r}
-
 ```

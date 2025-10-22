@@ -87,6 +87,15 @@ pca_res <- prcomp(df_num, center = TRUE, scale. = TRUE)
 summary(pca_res)
 ```
 
+```{r}
+high_card_vars <- df |> 
+  select(where(is.character)) |>
+  summarise(across(everything(), ~n_distinct(.))) |>
+  pivot_longer(everything(), names_to="var", values_to="n_levels") |>
+  filter(n_levels > 10)
+high_card_vars
+```
+
 
 ```{r}
 #data split + cv

@@ -1,0 +1,77 @@
+---
+title: "preprocess"
+author: "mia"
+date: "2025-10-21"
+output: html_document
+---
+```{r}
+library(tidymodels)
+library(themis)
+library(readr)
+library(dplyr)  
+library(tibble) 
+```
+
+```{r}
+df <- read_csv("cleaned_data.csv")
+df <- df |> 
+  # remove irrelevant or unsuitable data for modeling
+  filter(outcome != "Indeterminate") |> 
+  select(-room_type, -neighborhood_overview, -beds) |> 
+  mutate(outcome = factor(outcome)) # convert to factor variable
+
+# data split + cv
+split <- initial_split(df, prop = 0.8, strata = outcome) # 80% training, 20% test
+train <- training(split)
+test <- testing(split)
+folds <- vfold_cv(train, v = 10, strata = outcome) #stratified sampling by `outcome`, 10 folds
+
+# variables with more than 10 categories
+high_card_vars <- df |> 
+  select(where(is.character)) |>
+  summarise(across(everything(), ~n_distinct(.))) |>
+  pivot_longer(everything(), names_to="var", values_to="n_levels") |>
+  filter(n_levels > 10)
+
+# establishing a data preprocessing process
+# This recipe is a unified preprocessing blueprint that automatically prep()s (fits the preprocessing) on the training subset and bake()s (applies the same transformation) on the validation subset in each fold of cross-validation.
+rec <- recipe(outcome ~ ., data = train) |>
+  # convert character variables to factors (categorical variables)
+  step_string2factor(all_nominal_predictors()) |> 
+  # for variables with larger than 10 categories, merge the categories with a proportion of <2% into “other”
+  step_other(all_of(high_card_vars$var), threshold = 0.02) |> 
+  # fill missing values of numeric variables with the median
+  step_impute_median(all_numeric_predictors()) |> 
+  # take the logarithm of some skewed variables (add offset=1 to prevent log(0))
+  step_log(price, number_of_reviews, reviews_per_month, offset = 1) |>
+  # convert categorical variables to dummy variables (do not use one-hot encoding, keep the reference level)
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) |> 
+  # standardize the numeric variables (mean 0 variance 1)
+  step_normalize(all_numeric_predictors()) |>
+  # upsample the target variable to balance the class ratio (solve the class imbalance problem)
+  step_upsample(outcome)
+
+# metric set
+metric_set_all <- metric_set(accuracy, f_meas, roc_auc)
+
+# metric function, input model+test data return performance in tibble
+eval_metrics <- function(model_fit, test_data) {
+  test_data$outcome <- factor(test_data$outcome,
+                              levels = levels(train$outcome))
+  pred <- predict(model_fit, test_data, type = "prob") |>
+    bind_cols(predict(model_fit, test_data)) |>
+    bind_cols(test_data |> select(outcome))
+  
+  acc <- accuracy(pred, truth = outcome, estimate = .pred_class) |> pull(.estimate)
+  f1  <- f_meas(pred, truth = outcome, estimate = .pred_class, estimator = "macro") |> pull(.estimate)
+  auc <- tryCatch({
+    roc_auc(pred, truth = outcome,
+            dplyr::matches("^\\.pred_(?!class)", perl = TRUE),
+            estimator = "hand_till") |>
+      dplyr::pull(.estimate) |>
+      as.numeric()
+  }, error = function(e) NA_real_)
+  
+  tibble(Accuracy = acc, Macro_F1 = f1, Macro_ROC_AUC = auc)
+}
+```

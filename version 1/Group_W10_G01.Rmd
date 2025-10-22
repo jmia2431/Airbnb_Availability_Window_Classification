@@ -64,7 +64,7 @@ knitr::opts_chunk$set(
   out.extra = 'style="display:block; margin:0 auto; max-width:90%;"'
 )
 
-orig_data = read.csv("./listings.csv")
+orig_data = read.csv("datasets/listings.csv")
 ```
 
 ## **Define the Problem**
@@ -237,7 +237,7 @@ Building on the data cleaning and outcome construction in *Part 3*, this section
 
 ```{r load-cleaned-data}
 # Load cleaned dataset
-cleaned_data <- read.csv("data.csv")
+cleaned_data <- read.csv("datasets/cleaned_data.csv")
 ```
 
 #### **Outcome Distribution**

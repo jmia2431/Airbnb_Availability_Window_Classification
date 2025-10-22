@@ -7,6 +7,16 @@
     <script src="libs/header-attrs-2.25/header-attrs.js"></script>
     <link href="libs/remark-css-0.0.1/default.css" rel="stylesheet" />
     <link href="libs/remark-css-0.0.1/default-fonts.css" rel="stylesheet" />
+    <script src="libs/htmlwidgets-1.6.4/htmlwidgets.js"></script>
+    <script src="libs/d3-3.3.8/d3.min.js"></script>
+    <script src="libs/dagre-0.4.0/dagre-d3.min.js"></script>
+    <link href="libs/mermaid-0.3.0/dist/mermaid.css" rel="stylesheet" />
+    <script src="libs/mermaid-0.3.0/dist/mermaid.slim.min.js"></script>
+    <link href="libs/DiagrammeR-styles-0.2/styles.css" rel="stylesheet" />
+    <script src="libs/chromatography-0.1/chromatography.js"></script>
+    <script src="libs/DiagrammeR-binding-1.0.11/DiagrammeR.js"></script>
+    <script src="libs/kePrint-0.0.1/kePrint.js"></script>
+    <link href="libs/lightable-0.0.1/lightable.css" rel="stylesheet" />
   </head>
   <body>
     <textarea id="source">
@@ -22,42 +32,119 @@ class: center, middle, inverse, title-slide
 ### 
 ]
 .date[
-### 2016/12/12 (updated: 2025-10-20)
+### date (updated: 2025-10-23)
 ]
 
 ---
 
-# Project Topic
-- motivation
+### Project Topic
+- 简要介绍你的研究主题（1 句话说明你在研究什么）
+
+- 数据来源背景（例如：Inside Airbnb Sydney Dataset / World Bank Economic Indicators）
+
+- 项目的总体目标（例如：预测、分类、比较、模式发现）
+
+（可加1张主题相关图片或Logo）
 ---
-# Research Question &amp; Why it matters?
-- research question
-- why it matters
-- hypothesis
+### Research Question &amp; Why it matters?
+- Research Question: 用一句话表述主要问题（例如：Can we predict the rental type of Sydney Airbnb listings based on host and property features?）
+
+- Why It Matters: 社会或商业意义（例如：帮助房东优化定价、为城市监管提供参考），数据分析价值（例如：揭示租赁市场模式、支持决策）
+
+- Hypothesis for the project
+
+(可以用图标或1张对比图表示问题的重要性)
 ---
-# How you process the data?
-- data source: origin, coverage, number of observations and attributes
-- data cleaning process
+### Data Description
+
+
+- Inside Airbnb (Sydney, 10 June 2025) — public web-scraped data
+
+- 18187 listings × 79 variables
+
+- Mix of 42 numeric and 32 categorical features
+
+- 59 variables have more than 20 unique levels
+
+- Overall missing rate: 8.81%
+
+- Fully complete variables: 41
+
+- 21 variables have &gt;10% missingness
 ---
-# What Does Your Data Look Like?
-- statistical summary
-- key variable distributions
-- relationships between features
-- patterns (if any)
+### Data Cleaning and Preparation
+
+&lt;div class="columns-2" style="display: flex;align-items: flex-start;justify-content: flex-start; gap: 10px;"&gt;
+&lt;div style="flex: 0 0 55%; margin-top:-50px"&gt;
+&lt;p&gt;&lt;b&gt;Outcome Variable&lt;/b&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt; Categorical target: month with the highest availability (next 3 months)
+&lt;br&gt;&lt;/br&gt;
+&lt;li&gt; Captures short-term temporal variation in Airbnb availability
+&lt;br&gt;&lt;/br&gt;
+&lt;li&gt; Recast forward availability into 3 windows (0–30 / 31–60 / 61–90 days), “Indeterminate” for ties
+&lt;br&gt;&lt;/br&gt;
+&lt;li&gt; Forms a multi-class classification problem
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div style="flex: 0 0 45%; text-align:left; zoom:1.5; transform-origin: top; margin-top:-150px; margin-left: 10px"&gt;
+
+<div id="htmlwidget-0cf31dc64bbba20e1f71" style="width:500px;height:580px;" class="DiagrammeR html-widget"></div>
+<script type="application/json" data-for="htmlwidget-0cf31dc64bbba20e1f71">{"x":{"diagram":"\ngraph TB \nA(Feature Engineering) --> B(Sanity Filtering)\nB --> C(Outcome Construction)\nC --> D(Drop Irrelevant Columns)\n"},"evals":[],"jsHooks":[]}</script>
+&lt;/div&gt;
+&lt;/div&gt;
 ---
-# Data Preprocess
-- steps applied before training models
-- train/test split &amp; cross-validation
+### Data After Cleaning
+&lt;table class=" lightable-paper table table-bordered" style="font-family: Arial; margin-left: auto; margin-right: auto; font-size: 12px; margin-left: auto; margin-right: auto;"&gt;
+ &lt;thead&gt;
+  &lt;tr&gt;
+   &lt;th style="text-align:left;"&gt; Item &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; Before.Cleaning &lt;/th&gt;
+   &lt;th style="text-align:left;"&gt; After.Cleaning &lt;/th&gt;
+  &lt;/tr&gt;
+ &lt;/thead&gt;
+&lt;tbody&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 5cm; font-weight: bold;"&gt; Size &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; 18187 listings × 79 variables &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; 8883 listings × 15 variables &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 5cm; font-weight: bold;"&gt; Feature types &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; 42 numeric, 32 categorical &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; 12 numeric, 32 categorical &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 5cm; font-weight: bold;"&gt; Number of High-cardinality Variables &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; 59 &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; 9 &lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+   &lt;td style="text-align:left;width: 5cm; font-weight: bold;"&gt; Overall Missing Rate(%) &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; 8.81 &lt;/td&gt;
+   &lt;td style="text-align:left;"&gt; 0.39 &lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
 ---
-# What model(s) are you using? Why?
+### Exploary Data Analysis
+
+![](Presentation_files/figure-html/unnamed-chunk-4-1.svg)&lt;!-- --&gt;
+---
+### Data Preprocessing for Modeling
+<div id="htmlwidget-333c0eaf69a2dee284ff" style="width:800px;height:550px;" class="DiagrammeR html-widget"></div>
+<script type="application/json" data-for="htmlwidget-333c0eaf69a2dee284ff">{"x":{"diagram":"\ngraph TD\n  subgraph Model Evaluation Metrics\n    C1(Define metric set)--> C2(Define metrics evaluation)\n    C2 --> C3(Compute Accuracy, Macro-F1,and Macro ROC-AUC)\n  end\n\n    B(Recipe Preprocessing per CV fold) --> B1(Convert characters to factors)\n  subgraph Recipe Preprocessing per CV fold\n    B1 --> B2(Merge rare categories smaller than 2%)\n    B2 --> B3(Impute missing numeric values with median)\n    B3 --> B4(Log-transform skewed variables)\n    B4 --> B5(Dummy encode categorical variables)\n    B5 --> B6(Normalize numeric predictors)\n    B6 --> B7(Upsample target variable)\n  end\n\n  subgraph Data Split & Cross-Validatiom\n    A1(Start: Raw dataset) --> A2(Initial split:80% training / 20% testing, stratified by outcome)\n    A2 --> A3(Training subset 80%)\n    A3 --> A5(10-fold cross-validation, stratified by outcome)\n    A2 --> A4(Testing subset 20%)\n  end\n\nA5 --> B\nA4 --> C3\nB --> C3\nB7 -->|repeat for next fold| B1\n"},"evals":[],"jsHooks":[]}</script>
+---
+### What model(s) are you using? Why?
 - definition, assumption, interpretability, tune
 - performance metrics selection
 ---
-# Key Results and Visuals
+### Key Results and Visuals
 - result for performance metrics in table
 - visual of actual vs predicted and tuning result for best model
 ---
-# Final Insighs: What have you learned &amp; link back to the research problem
+### Final Insighs: What have you learned &amp; link back to the research problem
 - findings
 - answer research question
 - reflect result in real life
@@ -69,7 +156,8 @@ class: center, middle, inverse, title-slide
 <script>var slideshow = remark.create({
   "highlightStyle": "github",
   "highlightLines": true,
-  "countIncrementalSlides": false
+  "countIncrementalSlides": false,
+  "afterInit": "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"
 });
 if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
   window.dispatchEvent(new Event('resize'));

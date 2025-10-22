@@ -11,38 +11,254 @@ output:
       highlightStyle: github
       highlightLines: true
       countIncrementalSlides: false
+      afterInit: ["https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"]
 ---
-# Project Topic
-- motivation
+### Project Topic
+- 简要介绍你的研究主题（1 句话说明你在研究什么）
+
+- 数据来源背景（例如：Inside Airbnb Sydney Dataset / World Bank Economic Indicators）
+
+- 项目的总体目标（例如：预测、分类、比较、模式发现）
+
+（可加1张主题相关图片或Logo）
 ---
-# Research Question & Why it matters?
-- research question
-- why it matters
-- hypothesis
+### Research Question & Why it matters?
+- Research Question: 用一句话表述主要问题（例如：Can we predict the rental type of Sydney Airbnb listings based on host and property features?）
+
+- Why It Matters: 社会或商业意义（例如：帮助房东优化定价、为城市监管提供参考），数据分析价值（例如：揭示租赁市场模式、支持决策）
+
+- Hypothesis for the project
+
+(可以用图标或1张对比图表示问题的重要性)
 ---
-# How you process the data?
-- data source: origin, coverage, number of observations and attributes
-- data cleaning process
+### Data Description
+```{r, message=FALSE, echo=FALSE}
+library(readr)
+library(tidyverse)
+df <- read_csv("../datasets/listings.csv")
+observations = dim(df)[1]
+variables = dim(df)[2]
+numeric = sum(sapply(df, is.numeric))
+logical = sum(sapply(df, is.logical))
+categorical = sum(sapply(df, is.character))
+cate_total = categorical + logical
+uniques <- sapply(df, function(x) n_distinct(x, na.rm = TRUE))
+overall_missing_pct <- round((sum(is.na(df))/(nrow(df)*ncol(df)))*100,2)
+miss_by_var <- data.frame(
+  variable = names(df),
+  n_missing = colSums(is.na(df))) %>%
+  mutate(
+    pct_missing = round(100 * n_missing / nrow(df), 2)) %>%
+  arrange(desc(pct_missing))
+total_missing_cells <- sum(miss_by_var$n_missing)
+miss_conc <- miss_by_var %>%
+  mutate(prop = n_missing / total_missing_cells, cum_prop = cumsum(prop))
+k_vals <- c(3, 5, 10)
+topk_cover <- lapply(k_vals, function(k){
+  tibble(
+    k = k,
+    topk_cum_pct_of_all_missing = round(100 * miss_conc$cum_prop[k], 2),
+    topk_vars = paste(miss_conc$variable[seq_len(min(k, nrow(miss_conc)))], collapse = ", "))}) %>% bind_rows()
+thresh <- c('>50' = 50, '>20' = 20, '>10' = 10, '>5' = 5, '>1' = 1)
+thresh_tbl <- tibble(
+  threshold_pct = names(thresh),
+  n_vars = sapply(unname(thresh), function(t) sum(miss_by_var$pct_missing > t)))
+n_zero_missing <- sum(miss_by_var$n_missing == 0)
+```
+
+- Inside Airbnb (Sydney, 10 June 2025) — public web-scraped data
+
+- `r observations` listings × `r variables` variables
+
+- Mix of `r numeric` numeric and `r cate_total` categorical features
+
+- `r sum(uniques > 20)` variables have more than 20 unique levels
+
+- Overall missing rate: `r overall_missing_pct`%
+
+- Fully complete variables: `r n_zero_missing`
+
+- `r thresh_tbl$n_vars[thresh_tbl$threshold_pct=='>10']` variables have >10% missingness
 ---
-# What Does Your Data Look Like?
-- statistical summary
-- key variable distributions
-- relationships between features
-- patterns (if any)
+### Data Cleaning and Preparation
+
+<div class="columns-2" style="display: flex;align-items: flex-start;justify-content: flex-start; gap: 10px;">
+<div style="flex: 0 0 55%; margin-top:-50px">
+<p><b>Outcome Variable</b></p>
+<ul>
+<li> Categorical target: month with the highest availability (next 3 months)
+<br></br>
+<li> Captures short-term temporal variation in Airbnb availability
+<br></br>
+<li> Recast forward availability into 3 windows (0–30 / 31–60 / 61–90 days), “Indeterminate” for ties
+<br></br>
+<li> Forms a multi-class classification problem
+</ul>
+</div>
+<div style="flex: 0 0 45%; text-align:left; zoom:1.5; transform-origin: top; margin-top:-150px; margin-left: 10px">
+
+```{r, echo=FALSE}
+library(DiagrammeR)
+DiagrammeR::mermaid("
+graph TB 
+A(Feature Engineering) --> B(Sanity Filtering)
+B --> C(Outcome Construction)
+C --> D(Drop Irrelevant Columns)
+", width = "500px", height = "580px")
+```
+</div>
+</div>
 ---
-# Data Preprocess
-- steps applied before training models
-- train/test split & cross-validation
+### Data After Cleaning
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+library(knitr)
+library(kableExtra)
+dfcleaned <- read_csv("../datasets/cleaned_data.csv")
+observationscl = dim(dfcleaned)[1]
+variablescl = dim(dfcleaned)[2]
+numericcl = sum(sapply(dfcleaned, is.numeric))
+logicalcl = sum(sapply(dfcleaned, is.logical))
+categoricalcl = sum(sapply(dfcleaned, is.character))
+cate_totalcl = categorical + logical
+uniquescl <- sapply(dfcleaned, function(x) n_distinct(x, na.rm = TRUE))
+overall_missing_pctcl <- round((sum(is.na(dfcleaned))/(nrow(dfcleaned)*ncol(dfcleaned)))*100,2)
+
+summary_table <- data.frame(
+  Item = c("Size", "Feature types", "Number of High-cardinality Variables", "Overall Missing Rate(%)"),
+  `Before Cleaning` = c(
+    paste(observations, "listings ×", variables, "variables"),
+    paste(numeric, "numeric,", cate_total, "categorical"),
+    paste(sum(uniques > 20)),
+    paste(overall_missing_pct)
+  ),
+  `After Cleaning` = c(
+    paste(observationscl, "listings ×", variablescl, "variables"),
+    paste(numericcl, "numeric,", cate_totalcl, "categorical"),
+    paste(sum(uniquescl > 20)),
+    paste(overall_missing_pctcl)
+  )
+)
+kable(summary_table, align = c("l", "l", "l"),   
+      booktabs = FALSE,
+  linesep = "") %>%
+  kable_paper(full_width = TRUE, html_font = "Arial") %>%
+  column_spec(1, bold = TRUE, width = "5cm") %>%
+  kable_styling(
+    bootstrap_options = c("bordered"),
+    position = "center",
+    full_width = TRUE,
+    font_size = 12)
+```
+
 ---
-# What model(s) are you using? Why?
+### Exploary Data Analysis
+
+```{r, echo=FALSE, message=FALSE, dev='svg', warning=FALSE, fig.width=20, fig.height=15}
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(ggcorrplot)
+
+palette <- c("#4C72B0", "#55A868", "#C44E52", "#8172B3")
+
+num_df <- dfcleaned %>% select(where(is.numeric))
+corr <- cor(num_df, use = "pairwise.complete.obs")
+num_long <- dfcleaned |> select(where(is.numeric)) |> pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
+num_scaled <- num_long %>%
+  group_by(variable) %>%
+  mutate(scaled_value = scale(value))
+
+p1 <- ggplot(
+  dfcleaned |> mutate(outcome = factor(
+    outcome,
+    levels = c("First-month", "Second-month", "Third-month", "Indeterminate"))),
+  aes(x = outcome, fill = outcome)) +
+  geom_bar(show.legend = FALSE) +
+  scale_fill_manual(values = palette) +
+  labs(title = "Outcome Class Distribution") +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),        
+    plot.background = element_blank(),   
+    plot.title = element_text(size = 15, face = "bold", hjust = 0.5),
+    axis.text.x = element_text(size = 10, angle = 10, vjust = 1),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank())
+
+
+p2 <- ggcorrplot(
+  corr,
+  lab = FALSE,
+  colors = c("#4C72B0", "white", "#C44E52")) +
+  labs(title = "Correlation Heatmap") +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.title = element_text(size = 15, face = "bold", hjust = 0.5),
+    legend.position = "none", 
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 10))
+
+p3 <- ggplot(num_scaled, aes(x = variable, y = scaled_value)) +
+  geom_violin(fill = "#4C72B0", alpha = 0.8) +
+  labs(
+    title = "Normalized Distributions (Z-score)",
+    x = NULL, y = "Z-score"
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(
+    plot.title = element_text(size = 15, face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 15, size = 15, hjust = 1))
+
+(p1 + p2 + plot_layout(widths = c(1.3, 0.7))) /
+  p3 +
+  plot_layout(heights = c(0.8, 1.2))
+```
+---
+### Data Preprocessing for Modeling
+```{r, echo=FALSE,message=FALSE}
+library(DiagrammeR)
+DiagrammeR::mermaid("
+graph TD
+  subgraph Model Evaluation Metrics
+    C1(Define metric set)--> C2(Define metrics evaluation)
+    C2 --> C3(Compute Accuracy, Macro-F1,and Macro ROC-AUC)
+  end
+
+    B(Recipe Preprocessing per CV fold) --> B1(Convert characters to factors)
+  subgraph Recipe Preprocessing per CV fold
+    B1 --> B2(Merge rare categories smaller than 2%)
+    B2 --> B3(Impute missing numeric values with median)
+    B3 --> B4(Log-transform skewed variables)
+    B4 --> B5(Dummy encode categorical variables)
+    B5 --> B6(Normalize numeric predictors)
+    B6 --> B7(Upsample target variable)
+  end
+
+  subgraph Data Split & Cross-Validatiom
+    A1(Start: Raw dataset) --> A2(Initial split:80% training / 20% testing, stratified by outcome)
+    A2 --> A3(Training subset 80%)
+    A3 --> A5(10-fold cross-validation, stratified by outcome)
+    A2 --> A4(Testing subset 20%)
+  end
+
+A5 --> B
+A4 --> C3
+B --> C3
+B7 -->|repeat for next fold| B1
+", width = "800px", height = "550px")
+```
+---
+### What model(s) are you using? Why?
 - definition, assumption, interpretability, tune
 - performance metrics selection
 ---
-# Key Results and Visuals
+### Key Results and Visuals
 - result for performance metrics in table
 - visual of actual vs predicted and tuning result for best model
 ---
-# Final Insighs: What have you learned & link back to the research problem
+### Final Insighs: What have you learned & link back to the research problem
 - findings
 - answer research question
 - reflect result in real life

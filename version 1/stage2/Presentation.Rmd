@@ -1,8 +1,6 @@
 ---
-title: "title"
-subtitle: "subtitle"
+title: "Predicting Short-Term Availability in Sydney Airbnb Listings"
 author: ""
-institute: ""
 date: "date (updated: `r Sys.Date()`)"
 output:
   xaringan::moon_reader:
@@ -14,22 +12,26 @@ output:
       afterInit: ["https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"]
 ---
 ### Project Topic
-- 简要介绍你的研究主题（1 句话说明你在研究什么）
+- Predict availability patterns of Sydney Airbnb listings.
 
-- 数据来源背景（例如：Inside Airbnb Sydney Dataset / World Bank Economic Indicators）
+<center><img src="image.jpg" width="200" alt="Airbnb Logo"></center>
 
-- 项目的总体目标（例如：预测、分类、比较、模式发现）
+- Inside Airbnb Sydney listings, June 2025.
 
-（可加1张主题相关图片或Logo）
+- Classify which upcoming month shows highest availability.
 ---
 ### Research Question & Why it matters?
-- Research Question: 用一句话表述主要问题（例如：Can we predict the rental type of Sydney Airbnb listings based on host and property features?）
+- Can listing features predict monthly availability patterns across Sydney?
+- 
+<section>
+  <p>🏠  <b>Behavior Insight:</b> Quantifies how host behavior affects availability cycles.<br></p>
 
-- Why It Matters: 社会或商业意义（例如：帮助房东优化定价、为城市监管提供参考），数据分析价值（例如：揭示租赁市场模式、支持决策）
+  <p>🧭 <b>Supply Planning:</b> Predicts when and where supply gaps emerge.<br></p>
 
-- Hypothesis for the project
+  <p>🧳 <b>Smart Travel:</b> Helps travelers find better time to book stays.<br></p>
+</section>
 
-(可以用图标或1张对比图表示问题的重要性)
+- Listing features can predict availability patterns.
 ---
 ### Data Description
 ```{r, message=FALSE, echo=FALSE}
@@ -66,8 +68,6 @@ thresh_tbl <- tibble(
 n_zero_missing <- sum(miss_by_var$n_missing == 0)
 ```
 
-- Inside Airbnb (Sydney, 10 June 2025) — public web-scraped data
-
 - `r observations` listings × `r variables` variables
 
 - Mix of `r numeric` numeric and `r cate_total` categorical features
@@ -84,6 +84,7 @@ n_zero_missing <- sum(miss_by_var$n_missing == 0)
 
 <div class="columns-2" style="display: flex;align-items: flex-start;justify-content: flex-start; gap: 10px;">
 <div style="flex: 0 0 55%; margin-top:-50px">
+<br></br>
 <p><b>Outcome Variable</b></p>
 <ul>
 <li> Categorical target: month with the highest availability (next 3 months)
@@ -147,7 +148,7 @@ kable(summary_table, align = c("l", "l", "l"),
     bootstrap_options = c("bordered"),
     position = "center",
     full_width = TRUE,
-    font_size = 12)
+    font_size = 20)
 ```
 
 ---

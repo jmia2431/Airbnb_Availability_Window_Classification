@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="" xml:lang="">
   <head>
-    <title>title</title>
+    <title>Predicting Short-Term Availability in Sydney Airbnb Listings</title>
     <meta charset="utf-8" />
     <meta name="author" content="" />
     <script src="libs/header-attrs-2.25/header-attrs.js"></script>
@@ -23,42 +23,41 @@
 class: center, middle, inverse, title-slide
 
 .title[
-# title
-]
-.subtitle[
-## subtitle
+# Predicting Short-Term Availability in Sydney Airbnb Listings
 ]
 .author[
 ### 
 ]
 .date[
-### date (updated: 2025-10-23)
+### date (updated: 2025-10-27)
 ]
 
 ---
 
 ### Project Topic
-- 简要介绍你的研究主题（1 句话说明你在研究什么）
+- Predict availability patterns of Sydney Airbnb listings.
 
-- 数据来源背景（例如：Inside Airbnb Sydney Dataset / World Bank Economic Indicators）
+&lt;center&gt;&lt;img src="image.jpg" width="200" alt="Airbnb Logo"&gt;&lt;/center&gt;
 
-- 项目的总体目标（例如：预测、分类、比较、模式发现）
+- Inside Airbnb Sydney listings, June 2025.
 
-（可加1张主题相关图片或Logo）
+- Classify which upcoming month shows highest availability.
 ---
 ### Research Question &amp; Why it matters?
-- Research Question: 用一句话表述主要问题（例如：Can we predict the rental type of Sydney Airbnb listings based on host and property features?）
+- Can listing features predict monthly availability patterns across Sydney?
+- 
+&lt;section&gt;
+  &lt;p&gt;🏠  &lt;b&gt;Behavior Insight:&lt;/b&gt; Quantifies how host behavior affects availability cycles.&lt;br&gt;&lt;/p&gt;
 
-- Why It Matters: 社会或商业意义（例如：帮助房东优化定价、为城市监管提供参考），数据分析价值（例如：揭示租赁市场模式、支持决策）
+  &lt;p&gt;🧭 &lt;b&gt;Supply Planning:&lt;/b&gt; Predicts when and where supply gaps emerge.&lt;br&gt;&lt;/p&gt;
 
-- Hypothesis for the project
+  &lt;p&gt;🧳 &lt;b&gt;Smart Travel:&lt;/b&gt; Helps travelers find better time to book stays.&lt;br&gt;&lt;/p&gt;
+&lt;/section&gt;
 
-(可以用图标或1张对比图表示问题的重要性)
+- Listing features can predict availability patterns.
 ---
 ### Data Description
 
-
-- Inside Airbnb (Sydney, 10 June 2025) — public web-scraped data
 
 - 18187 listings × 79 variables
 
@@ -76,6 +75,7 @@ class: center, middle, inverse, title-slide
 
 &lt;div class="columns-2" style="display: flex;align-items: flex-start;justify-content: flex-start; gap: 10px;"&gt;
 &lt;div style="flex: 0 0 55%; margin-top:-50px"&gt;
+&lt;br&gt;&lt;/br&gt;
 &lt;p&gt;&lt;b&gt;Outcome Variable&lt;/b&gt;&lt;/p&gt;
 &lt;ul&gt;
 &lt;li&gt; Categorical target: month with the highest availability (next 3 months)
@@ -89,13 +89,13 @@ class: center, middle, inverse, title-slide
 &lt;/div&gt;
 &lt;div style="flex: 0 0 45%; text-align:left; zoom:1.5; transform-origin: top; margin-top:-150px; margin-left: 10px"&gt;
 
-<div id="htmlwidget-0cf31dc64bbba20e1f71" style="width:500px;height:580px;" class="DiagrammeR html-widget"></div>
-<script type="application/json" data-for="htmlwidget-0cf31dc64bbba20e1f71">{"x":{"diagram":"\ngraph TB \nA(Feature Engineering) --> B(Sanity Filtering)\nB --> C(Outcome Construction)\nC --> D(Drop Irrelevant Columns)\n"},"evals":[],"jsHooks":[]}</script>
+<div id="htmlwidget-4ef81c3b36c217c8aaa6" style="width:500px;height:580px;" class="DiagrammeR html-widget"></div>
+<script type="application/json" data-for="htmlwidget-4ef81c3b36c217c8aaa6">{"x":{"diagram":"\ngraph TB \nA(Feature Engineering) --> B(Sanity Filtering)\nB --> C(Outcome Construction)\nC --> D(Drop Irrelevant Columns)\n"},"evals":[],"jsHooks":[]}</script>
 &lt;/div&gt;
 &lt;/div&gt;
 ---
 ### Data After Cleaning
-&lt;table class=" lightable-paper table table-bordered" style="font-family: Arial; margin-left: auto; margin-right: auto; font-size: 12px; margin-left: auto; margin-right: auto;"&gt;
+&lt;table class=" lightable-paper table table-bordered" style="font-family: Arial; margin-left: auto; margin-right: auto; font-size: 20px; margin-left: auto; margin-right: auto;"&gt;
  &lt;thead&gt;
   &lt;tr&gt;
    &lt;th style="text-align:left;"&gt; Item &lt;/th&gt;
@@ -133,8 +133,8 @@ class: center, middle, inverse, title-slide
 ![](Presentation_files/figure-html/unnamed-chunk-4-1.svg)&lt;!-- --&gt;
 ---
 ### Data Preprocessing for Modeling
-<div id="htmlwidget-333c0eaf69a2dee284ff" style="width:800px;height:550px;" class="DiagrammeR html-widget"></div>
-<script type="application/json" data-for="htmlwidget-333c0eaf69a2dee284ff">{"x":{"diagram":"\ngraph TD\n  subgraph Model Evaluation Metrics\n    C1(Define metric set)--> C2(Define metrics evaluation)\n    C2 --> C3(Compute Accuracy, Macro-F1,and Macro ROC-AUC)\n  end\n\n    B(Recipe Preprocessing per CV fold) --> B1(Convert characters to factors)\n  subgraph Recipe Preprocessing per CV fold\n    B1 --> B2(Merge rare categories smaller than 2%)\n    B2 --> B3(Impute missing numeric values with median)\n    B3 --> B4(Log-transform skewed variables)\n    B4 --> B5(Dummy encode categorical variables)\n    B5 --> B6(Normalize numeric predictors)\n    B6 --> B7(Upsample target variable)\n  end\n\n  subgraph Data Split & Cross-Validatiom\n    A1(Start: Raw dataset) --> A2(Initial split:80% training / 20% testing, stratified by outcome)\n    A2 --> A3(Training subset 80%)\n    A3 --> A5(10-fold cross-validation, stratified by outcome)\n    A2 --> A4(Testing subset 20%)\n  end\n\nA5 --> B\nA4 --> C3\nB --> C3\nB7 -->|repeat for next fold| B1\n"},"evals":[],"jsHooks":[]}</script>
+<div id="htmlwidget-1a73e9d74bfcb3c828ca" style="width:800px;height:550px;" class="DiagrammeR html-widget"></div>
+<script type="application/json" data-for="htmlwidget-1a73e9d74bfcb3c828ca">{"x":{"diagram":"\ngraph TD\n  subgraph Model Evaluation Metrics\n    C1(Define metric set)--> C2(Define metrics evaluation)\n    C2 --> C3(Compute Accuracy, Macro-F1,and Macro ROC-AUC)\n  end\n\n    B(Recipe Preprocessing per CV fold) --> B1(Convert characters to factors)\n  subgraph Recipe Preprocessing per CV fold\n    B1 --> B2(Merge rare categories smaller than 2%)\n    B2 --> B3(Impute missing numeric values with median)\n    B3 --> B4(Log-transform skewed variables)\n    B4 --> B5(Dummy encode categorical variables)\n    B5 --> B6(Normalize numeric predictors)\n    B6 --> B7(Upsample target variable)\n  end\n\n  subgraph Data Split & Cross-Validatiom\n    A1(Start: Raw dataset) --> A2(Initial split:80% training / 20% testing, stratified by outcome)\n    A2 --> A3(Training subset 80%)\n    A3 --> A5(10-fold cross-validation, stratified by outcome)\n    A2 --> A4(Testing subset 20%)\n  end\n\nA5 --> B\nA4 --> C3\nB --> C3\nB7 -->|repeat for next fold| B1\n"},"evals":[],"jsHooks":[]}</script>
 ---
 ### What model(s) are you using? Why?
 - definition, assumption, interpretability, tune
